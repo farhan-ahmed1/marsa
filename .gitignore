@@ -1,0 +1,46 @@
+# macOS
+.DS_Store
+
+# Data and databases
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+.npm/
+.pnpm-store/
+.yarn/
+.yarn-cache/
+.yarn-unplugged/
+.yarn-build-state.yml
+.yarn-integrity
+*.log
+
+# Editor
+.vscode/
+.idea/
+
+# Misc
+docs/PRD.md
+
