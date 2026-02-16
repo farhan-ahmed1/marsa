@@ -26,7 +26,7 @@ def test_hello_server():
         result = greet_impl(name)
         print(f"greet('{name}') -> {result}")
     
-    print("\n✅ Hello server working!\n")
+    print("\nHello server working!\n")
 
 
 def test_tavily_search_server():
@@ -51,7 +51,7 @@ def test_tavily_search_server():
         print(f"   Content: {result.content[:100]}...")
         print()
     
-    print("✅ Tavily search server working!\n")
+    print("Tavily search server working!\n")
 
 
 if __name__ == "__main__":

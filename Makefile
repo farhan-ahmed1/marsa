@@ -13,9 +13,13 @@ setup-backend:
 setup-frontend:
 	cd frontend && npm install
 
-# Run all tests
+# Run unit tests only (excludes integration tests)
 test:
-	.venv/bin/pytest backend/tests -v
+	.venv/bin/pytest backend/tests -v --ignore=backend/tests/integration
+
+# Run integration tests that use real APIs (consumes API quota)
+test\:integration:
+	.venv/bin/pytest backend/tests/integration -v -s
 
 # Lint backend code
 lint:
