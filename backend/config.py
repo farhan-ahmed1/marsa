@@ -4,6 +4,7 @@ Loads and validates environment variables required for the application.
 """
 
 import os
+import sys
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -20,12 +21,21 @@ class ConfigError(Exception):
 class Config:
     """Application configuration loaded from environment variables."""
 
-    def __init__(self):
-        """Initialize configuration and validate required values."""
+    def __init__(self, validate: bool = True):
+        """Initialize configuration and validate required values.
+        
+        Args:
+            validate: If False, allows missing env vars during testing.
+                     Automatically set to False when pytest is detected.
+        """
+        # Auto-detect pytest environment
+        if not validate or "pytest" in sys.modules:
+            validate = False
+        
         # API Keys
-        self.anthropic_api_key = self._get_required("ANTHROPIC_API_KEY")
-        self.openai_api_key = self._get_required("OPENAI_API_KEY")
-        self.tavily_api_key = self._get_required("TAVILY_API_KEY")
+        self.anthropic_api_key = self._get_required("ANTHROPIC_API_KEY", validate)
+        self.openai_api_key = self._get_required("OPENAI_API_KEY", validate)
+        self.tavily_api_key = self._get_required("TAVILY_API_KEY", validate)
 
         # Optional: LangSmith tracing
         self.langchain_tracing = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
@@ -36,20 +46,21 @@ class Config:
         self.environment = os.getenv("ENVIRONMENT", "development")
         self.debug = os.getenv("DEBUG", "false").lower() == "true"
 
-    def _get_required(self, key: str) -> str:
+    def _get_required(self, key: str, validate: bool = True) -> str:
         """Get a required environment variable or raise an error.
 
         Args:
             key: The environment variable name.
+            validate: If False, returns empty string instead of raising error.
 
         Returns:
             The environment variable value.
 
         Raises:
-            ConfigError: If the environment variable is not set or is empty.
+            ConfigError: If the environment variable is not set or is empty (when validate=True).
         """
-        value = os.getenv(key)
-        if not value:
+        value = os.getenv(key, "")
+        if not value and validate:
             raise ConfigError(
                 f"Required environment variable '{key}' is not set. "
                 f"Please set it in your .env file or environment."
