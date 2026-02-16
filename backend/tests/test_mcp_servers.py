@@ -5,7 +5,7 @@ Tests the hello world server and Tavily search server.
 
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -13,8 +13,8 @@ import pytest
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
-from mcp_servers.hello import greet_impl as greet
-from mcp_servers.tavily_search import search_impl as search, SearchResult
+from mcp_servers.hello import greet_impl as greet  # noqa: E402
+from mcp_servers.tavily_search import search_impl as search, SearchResult  # noqa: E402
 
 
 @pytest.fixture
@@ -70,9 +70,10 @@ class TestHelloServer:
 class TestTavilySearchServer:
     """Tests for the Tavily search MCP server."""
     
-    @patch('mcp_servers.tavily_search.tavily_client')
-    def test_search_returns_results(self, mock_client, mock_tavily_response):
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_returns_results(self, mock_get_client, mock_tavily_response):
         """Test that search returns a list of SearchResult objects (MOCKED)."""
+        mock_client = mock_get_client.return_value
         mock_client.search.return_value = mock_tavily_response
         
         results = search("Python programming language", max_results=3)
@@ -88,9 +89,10 @@ class TestTavilySearchServer:
         # Verify the mock was called correctly
         mock_client.search.assert_called_once()
     
-    @patch('mcp_servers.tavily_search.tavily_client')
-    def test_search_result_structure(self, mock_client, mock_tavily_response):
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_result_structure(self, mock_get_client, mock_tavily_response):
         """Test that SearchResult objects have the correct structure (MOCKED)."""
+        mock_client = mock_get_client.return_value
         mock_client.search.return_value = mock_tavily_response
         
         results = search("Rust programming language 2026", max_results=5)
@@ -117,9 +119,10 @@ class TestTavilySearchServer:
         # published_date can be None or a string
         assert result.published_date is None or isinstance(result.published_date, str)
     
-    @patch('mcp_servers.tavily_search.tavily_client')
-    def test_search_max_results_parameter(self, mock_client, mock_tavily_response):
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_max_results_parameter(self, mock_get_client, mock_tavily_response):
         """Test that max_results parameter is respected (MOCKED)."""
+        mock_client = mock_get_client.return_value
         # Mock returns 3 results
         mock_client.search.return_value = {
             "results": mock_tavily_response["results"][:3]
@@ -133,9 +136,10 @@ class TestTavilySearchServer:
         assert len(results_3) == 3
         assert len(results_5) == 3  # Only 3 in our mock data
     
-    @patch('mcp_servers.tavily_search.tavily_client')
-    def test_search_default_max_results(self, mock_client, mock_tavily_response):
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_default_max_results(self, mock_get_client, mock_tavily_response):
         """Test that default max_results is 5 (MOCKED)."""
+        mock_client = mock_get_client.return_value
         mock_client.search.return_value = mock_tavily_response
         
         results = search("JavaScript frameworks")
@@ -144,9 +148,10 @@ class TestTavilySearchServer:
         assert len(results) <= 5
         mock_client.search.assert_called_once()
     
-    @patch('mcp_servers.tavily_search.tavily_client')
-    def test_search_with_complex_query(self, mock_client, mock_tavily_response):
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_with_complex_query(self, mock_get_client, mock_tavily_response):
         """Test search with a more complex query (MOCKED)."""
+        mock_client = mock_get_client.return_value
         mock_client.search.return_value = mock_tavily_response
         
         query = "latest developments in Rust programming language 2026"

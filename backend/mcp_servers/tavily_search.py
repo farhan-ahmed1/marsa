@@ -11,20 +11,28 @@ from typing import Optional
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
-from fastmcp import FastMCP
-from pydantic import BaseModel, Field
-from tavily import TavilyClient
+from fastmcp import FastMCP  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from tavily import TavilyClient  # noqa: E402
 
-from config import Config
+from config import Config  # noqa: E402
 
 # Initialize configuration
 config = Config()
 
-# Initialize Tavily client
-tavily_client = TavilyClient(api_key=config.tavily_api_key)
-
 # Initialize MCP server
 mcp = FastMCP("tavily-search-server")
+
+# Lazy-load Tavily client to avoid initialization during test collection
+_tavily_client = None
+
+
+def get_tavily_client() -> TavilyClient:
+    """Get or create the Tavily client instance."""
+    global _tavily_client
+    if _tavily_client is None:
+        _tavily_client = TavilyClient(api_key=config.tavily_api_key)
+    return _tavily_client
 
 
 class SearchResult(BaseModel):
@@ -65,7 +73,7 @@ def search_impl(query: str, max_results: int = 5) -> list[SearchResult]:
         List of search results with title, url, content, score, and published_date
     """
     # Call Tavily API
-    response = tavily_client.search(
+    response = get_tavily_client().search(
         query=query,
         max_results=max_results,
         include_answer=False,  # We don't need the AI-generated answer
