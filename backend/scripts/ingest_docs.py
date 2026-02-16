@@ -18,7 +18,7 @@ from pathlib import Path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
-from mcp_servers.document_store import (
+from mcp_servers.document_store import (  # noqa: E402
     ingest_document_impl,
     list_documents_impl,
     get_collection,
