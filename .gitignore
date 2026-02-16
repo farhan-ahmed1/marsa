@@ -43,4 +43,6 @@ dist/
 
 # Misc
 docs/PRD.md
+.github/instructions
+.github/copilot-instructions.md
 
