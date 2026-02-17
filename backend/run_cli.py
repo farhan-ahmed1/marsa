@@ -26,7 +26,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn  # noqa: E402
 from rich.table import Table  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
 
-from graph.workflow import run_research  # noqa: E402
+from graph.workflow import get_workflow, run_research  # noqa: E402
+from graph.state import HITLFeedback, PipelineStatus, VerificationVerdict  # noqa: E402
 
 
 console = Console()
@@ -86,13 +87,13 @@ def print_trace_summary(state: dict):
     table.add_column("Latency", justify="right")
     
     for event in trace[-15:]:  # Show last 15 events
-        agent = getattr(event, 'agent', event.get('agent', 'unknown'))
+        agent = getattr(event, 'agent', 'unknown')
         if hasattr(agent, 'value'):
             agent = agent.value
         
-        action = getattr(event, 'action', event.get('action', ''))
-        detail = getattr(event, 'detail', event.get('detail', ''))
-        latency = getattr(event, 'latency_ms', event.get('latency_ms'))
+        action = getattr(event, 'action', '')
+        detail = getattr(event, 'detail', '')
+        latency = getattr(event, 'latency_ms', None)
         
         latency_str = f"{latency:.0f}ms" if latency else "-"
         
@@ -150,10 +151,10 @@ def print_citations(state: dict):
     table.add_column("URL", style="dim")
     
     for citation in citations:
-        number = getattr(citation, 'number', citation.get('number', 0))
-        title = getattr(citation, 'title', citation.get('title', ''))
-        score = getattr(citation, 'source_quality_score', citation.get('source_quality_score', 0.5))
-        url = getattr(citation, 'url', citation.get('url', ''))
+        number = getattr(citation, 'number', 0)
+        title = getattr(citation, 'title', '')
+        score = getattr(citation, 'source_quality_score', 0.5)
+        url = getattr(citation, 'url', '')
         
         # Truncate for display
         if len(title) > 40:
@@ -193,6 +194,77 @@ def print_stats(state: dict):
         console.print(f"  LLM calls: {metadata.llm_calls}")
 
 
+def _is_workflow_interrupted(state: dict) -> bool:
+    """Check if the workflow is interrupted (waiting for HITL review).
+    
+    When HITL is enabled, the workflow interrupts after fact_checker.
+    At that point, status is FACT_CHECKING and no report exists yet.
+    """
+    status = state.get("status", "")
+    has_report = bool(state.get("report"))
+    has_verification = bool(state.get("verification_results"))
+    
+    # Interrupted if we have verification results but no report and status is fact_checking
+    return (
+        status == PipelineStatus.FACT_CHECKING.value
+        and has_verification
+        and not has_report
+    )
+
+
+def _display_hitl_review(state: dict):
+    """Display fact-check results for human review."""
+    console.print()
+    console.print(Panel(
+        "[bold yellow]Human Review Required[/bold yellow]\n\n"
+        "The fact-checker has verified the claims. Please review and decide how to proceed.",
+        border_style="yellow",
+    ))
+    
+    # Show verification summary
+    verification_results = state.get("verification_results", [])
+    if verification_results:
+        console.print()
+        console.print("[bold]Verification Results:[/bold]")
+        
+        supported = sum(
+            1 for v in verification_results 
+            if getattr(v, 'verdict', None) == VerificationVerdict.SUPPORTED
+        )
+        contradicted = sum(
+            1 for v in verification_results 
+            if getattr(v, 'verdict', None) == VerificationVerdict.CONTRADICTED
+        )
+        uncertain = len(verification_results) - supported - contradicted
+        
+        console.print(f"  Supported: [green]{supported}[/green]")
+        console.print(f"  Contradicted: [red]{contradicted}[/red]")
+        console.print(f"  Uncertain: [yellow]{uncertain}[/yellow]")
+
+
+def _get_hitl_feedback() -> HITLFeedback:
+    """Prompt the user for HITL feedback."""
+    console.print()
+    console.print("[bold]Options:[/bold]")
+    console.print("  [cyan]1[/cyan] - Approve and continue to synthesis")
+    console.print("  [cyan]2[/cyan] - Dig deeper into a specific topic")
+    console.print("  [cyan]3[/cyan] - Abort research")
+    console.print()
+    
+    while True:
+        choice = console.input("[bold]Your choice (1-3):[/bold] ").strip()
+        
+        if choice == "1":
+            return HITLFeedback(action="approve")
+        elif choice == "2":
+            topic = console.input("[bold]Topic to explore further:[/bold] ").strip()
+            return HITLFeedback(action="dig_deeper", topic=topic)
+        elif choice == "3":
+            return HITLFeedback(action="abort")
+        else:
+            console.print("[red]Invalid choice. Please enter 1, 2, or 3.[/red]")
+
+
 async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
     """Run the research pipeline with live progress display.
     
@@ -203,8 +275,13 @@ async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
     Returns:
         Final agent state.
     """
+    import uuid
+    
     console.print(f"[bold]Query:[/bold] {query}")
     console.print()
+    
+    thread_id = str(uuid.uuid4())
+    result = None
     
     with Progress(
         SpinnerColumn(),
@@ -217,13 +294,43 @@ async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
         progress.update(task, description="[cyan]Planning research strategy...")
         
         # Run the research
-        try:
-            result = await run_research(query, enable_hitl=enable_hitl)
+        result = await run_research(query, thread_id=thread_id, enable_hitl=enable_hitl)
+        
+        # Check if workflow is interrupted for HITL
+        if enable_hitl and _is_workflow_interrupted(result):
+            progress.update(task, description="[yellow]Awaiting human review...")
+        else:
             progress.update(task, description="[green]Complete!")
+    
+    # Handle HITL review outside of progress context
+    if enable_hitl and _is_workflow_interrupted(result):
+        _display_hitl_review(result)
+        feedback = _get_hitl_feedback()
+        
+        if feedback.action == "abort":
+            console.print("[yellow]Research aborted by user.[/yellow]")
             return result
-        except Exception as e:
-            progress.update(task, description=f"[red]Error: {e}")
-            raise
+        
+        # Resume workflow with feedback
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("[cyan]Resuming workflow...", total=None)
+            
+            # Get workflow and resume from checkpoint
+            workflow = get_workflow(enable_hitl=enable_hitl)
+            config = {"configurable": {"thread_id": thread_id}}
+            
+            # Inject feedback into the checkpointed state and resume
+            # update_state adds values to the existing state, then ainvoke(None) resumes
+            workflow.update_state(config, {"hitl_feedback": feedback})
+            result = await workflow.ainvoke(None, config)
+            progress.update(task, description="[green]Complete!")
+    
+    return result
 
 
 async def interactive_mode():
