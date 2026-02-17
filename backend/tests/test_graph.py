@@ -476,7 +476,7 @@ class TestHITLRouting:
         assert result == "synthesizer"
 
     def test_route_after_hitl_dig_deeper(self):
-        """Test that 'dig_deeper' action routes to researcher."""
+        """Test that 'dig_deeper' action routes to planner for new plan."""
         from graph.workflow import route_after_hitl_feedback
         from graph.state import HITLFeedback
         
@@ -489,7 +489,7 @@ class TestHITLRouting:
         state["iteration_count"] = 0
         
         result = route_after_hitl_feedback(state)
-        assert result == "researcher"
+        assert result == "planner"
 
     def test_route_after_hitl_abort(self):
         """Test that 'abort' action routes to end."""
