@@ -20,7 +20,13 @@ from agents.fact_checker import (
     verify_claim,
 )
 from agents.planner import create_query_plan, planner_node
-from agents.researcher import extract_claims, research_node
+from agents.researcher import (
+    extract_claims,
+    merge_research_node,
+    research_node,
+    research_single_sub_query,
+    research_sub_query_node,
+)
 from agents.source_scorer import score_source
 from agents.synthesizer import generate_report, synthesize_node
 
@@ -31,6 +37,10 @@ __all__ = [
     # Researcher
     "research_node",
     "extract_claims",
+    # Researcher - Parallel execution
+    "research_sub_query_node",
+    "merge_research_node",
+    "research_single_sub_query",
     # Fact-Checker
     "fact_check_node",
     "verify_claim",

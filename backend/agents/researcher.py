@@ -582,3 +582,310 @@ async def research_node(state: AgentState) -> dict:
         "status": next_status,
         "agent_trace": agent_trace,
     }
+
+
+# ---------------------------------------------------------------------------
+# Parallel Execution Support
+# ---------------------------------------------------------------------------
+
+
+async def research_single_sub_query(
+    sub_query: str,
+    search_strategy: str,
+    mcp_client: MCPClient,
+) -> tuple[list[ResearchResult], list[TraceEvent], list[str]]:
+    """Research a single sub-query (used in parallel execution).
+    
+    Args:
+        sub_query: The specific sub-query to research.
+        search_strategy: Search strategy ('web_only', 'docs_only', 'hybrid').
+        mcp_client: MCP client for searches.
+        
+    Returns:
+        Tuple of (results, trace_events, errors).
+    """
+    results: list[ResearchResult] = []
+    trace_events: list[TraceEvent] = []
+    errors: list[str] = []
+    
+    logger.info("researching_sub_query", sub_query=sub_query[:80])
+    
+    # Web search
+    if search_strategy in ["web_only", "hybrid"]:
+        try:
+            start_time = time()
+            web_results = await mcp_client.web_search(sub_query, max_results=5)
+            latency_ms = (time() - start_time) * 1000
+            
+            trace_events.append(TraceEvent(
+                agent=AgentName.RESEARCHER,
+                action="web_search",
+                detail=f"Parallel search: {sub_query[:60]}",
+                latency_ms=latency_ms,
+                metadata={"result_count": len(web_results), "parallel": True},
+            ))
+            
+            for web_result in web_results:
+                results.append(ResearchResult(
+                    content=web_result.content,
+                    source_url=web_result.url,
+                    source_title=web_result.title,
+                    source_type="web",
+                    relevance_score=web_result.score,
+                    sub_query=sub_query,
+                    published_date=web_result.published_date,
+                ))
+                
+        except Exception as e:
+            logger.exception("parallel_web_search_error", sub_query=sub_query[:50], error=str(e))
+            errors.append(f"Web search error for '{sub_query[:30]}...': {str(e)}")
+            trace_events.append(TraceEvent(
+                agent=AgentName.RESEARCHER,
+                action="web_search_error",
+                detail=f"Parallel search error: {str(e)[:80]}",
+                metadata={"sub_query": sub_query, "error": str(e), "parallel": True},
+            ))
+    
+    # Document store search
+    if search_strategy in ["docs_only", "hybrid"]:
+        try:
+            start_time = time()
+            doc_results = await mcp_client.doc_search(sub_query, n_results=5)
+            latency_ms = (time() - start_time) * 1000
+            
+            trace_events.append(TraceEvent(
+                agent=AgentName.RESEARCHER,
+                action="doc_search",
+                detail=f"Parallel doc search: {sub_query[:60]}",
+                latency_ms=latency_ms,
+                metadata={"result_count": len(doc_results), "parallel": True},
+            ))
+            
+            for doc_result in doc_results:
+                results.append(ResearchResult(
+                    content=doc_result.content,
+                    source_url=doc_result.source_url,
+                    source_title=doc_result.title,
+                    source_type="document",
+                    relevance_score=doc_result.relevance_score,
+                    sub_query=sub_query,
+                ))
+                
+        except Exception as e:
+            logger.exception("parallel_doc_search_error", sub_query=sub_query[:50], error=str(e))
+            errors.append(f"Doc search error for '{sub_query[:30]}...': {str(e)}")
+            trace_events.append(TraceEvent(
+                agent=AgentName.RESEARCHER,
+                action="doc_search_error",
+                detail=f"Parallel doc search error: {str(e)[:80]}",
+                metadata={"sub_query": sub_query, "error": str(e), "parallel": True},
+            ))
+    
+    logger.info("sub_query_complete", sub_query=sub_query[:50], result_count=len(results))
+    return results, trace_events, errors
+
+
+async def research_sub_query_node(state: dict) -> dict:
+    """LangGraph node for researching a single sub-query in parallel.
+    
+    This node is spawned by the Send API for each sub-query when
+    parallel execution is enabled. It researches one sub-query and
+    returns the results for later merging.
+    
+    Args:
+        state: Dict containing 'sub_query' and 'parent_state' with plan/settings.
+        
+    Returns:
+        Dict with sub-query results to be merged.
+    """
+    from graph.state import SubQueryResult
+    
+    sub_query = state.get("sub_query", "")
+    parent_state = state.get("parent_state", {})
+    plan = parent_state.get("plan")
+    
+    if not sub_query or not plan:
+        logger.warning("research_sub_query_node_invalid_input", state_keys=list(state.keys()))
+        return {
+            "parallel_results": [SubQueryResult(
+                sub_query=sub_query or "unknown",
+                results=[],
+                trace_events=[],
+                errors=["Invalid input to parallel research node"],
+            ).model_dump()],
+        }
+    
+    # Initialize MCP client
+    try:
+        mcp_client = MCPClient()
+    except Exception as e:
+        logger.exception("parallel_mcp_client_error", error=str(e))
+        return {
+            "parallel_results": [SubQueryResult(
+                sub_query=sub_query,
+                results=[],
+                trace_events=[],
+                errors=[f"MCP client init failed: {str(e)}"],
+            ).model_dump()],
+        }
+    
+    # Research the sub-query
+    results, trace_events, errors = await research_single_sub_query(
+        sub_query=sub_query,
+        search_strategy=plan.search_strategy.value if hasattr(plan.search_strategy, 'value') else plan.search_strategy,
+        mcp_client=mcp_client,
+    )
+    
+    # Convert to serializable format
+    return {
+        "parallel_results": [SubQueryResult(
+            sub_query=sub_query,
+            results=results,
+            trace_events=trace_events,
+            errors=errors,
+        ).model_dump()],
+    }
+
+
+async def merge_research_node(state: AgentState) -> dict:
+    """LangGraph node that merges results from parallel sub-query execution.
+    
+    Collects all parallel_results, deduplicates, scores sources, extracts claims,
+    and produces the final research output.
+    
+    Args:
+        state: AgentState with parallel_results from all sub-query workers.
+        
+    Returns:
+        Dict with merged research_results, claims, source_scores, etc.
+    """
+    from graph.state import SubQueryResult
+    
+    query = state.get("query", "")
+    plan = state.get("plan")
+    parallel_results = state.get("parallel_results", [])
+    agent_trace = state.get("agent_trace", []).copy()
+    all_errors = state.get("errors", []).copy()
+    
+    logger.info(
+        "merging_parallel_results",
+        query=query[:50],
+        result_count=len(parallel_results),
+    )
+    
+    # Add merge start trace
+    agent_trace.append(TraceEvent(
+        agent=AgentName.RESEARCHER,
+        action="merge_start",
+        detail=f"Merging results from {len(parallel_results)} parallel tracks",
+        metadata={"parallel_track_count": len(parallel_results)},
+    ))
+    
+    # Collect all results from parallel tracks
+    all_results: list[ResearchResult] = []
+    
+    for result_dict in parallel_results:
+        try:
+            sub_result = SubQueryResult.model_validate(result_dict)
+            all_results.extend(sub_result.results)
+            agent_trace.extend(sub_result.trace_events)
+            all_errors.extend(sub_result.errors)
+        except Exception as e:
+            logger.warning("invalid_parallel_result", error=str(e), result=result_dict)
+            all_errors.append(f"Failed to parse parallel result: {str(e)}")
+    
+    logger.info(
+        "parallel_results_collected",
+        total_results=len(all_results),
+        total_errors=len(all_errors),
+    )
+    
+    # Handle empty results
+    if not all_results:
+        agent_trace.append(TraceEvent(
+            agent=AgentName.RESEARCHER,
+            action="merge_complete",
+            detail="Merge completed with no results",
+            metadata={"result_count": 0},
+        ))
+        return {
+            "research_results": [],
+            "claims": [],
+            "source_scores": {},
+            "status": PipelineStatus.FACT_CHECKING.value if plan and plan.needs_fact_check else PipelineStatus.SYNTHESIZING.value,
+            "errors": all_errors + ["No research results found from parallel execution"],
+            "agent_trace": agent_trace,
+            "parallel_results": [],  # Clear parallel results
+        }
+    
+    # Deduplicate results
+    deduplicated_results = _deduplicate_results(all_results)
+    
+    # Score sources and sort by quality
+    sorted_results, source_scores = _score_and_sort_results(deduplicated_results)
+    
+    agent_trace.append(TraceEvent(
+        agent=AgentName.RESEARCHER,
+        action="source_scoring",
+        detail=f"Scored {len(source_scores)} sources from parallel tracks",
+        metadata={
+            "source_count": len(source_scores),
+            "avg_score": round(sum(source_scores.values()) / len(source_scores), 3) if source_scores else 0.0,
+            "parallel": True,
+        },
+    ))
+    
+    # Extract claims using Claude
+    claims: list[Claim] = []
+    try:
+        start_time = time()
+        claims = await extract_claims(sorted_results, query)
+        latency_ms = (time() - start_time) * 1000
+        
+        agent_trace.append(TraceEvent(
+            agent=AgentName.RESEARCHER,
+            action="claim_extraction",
+            detail=f"Extracted {len(claims)} claims from merged results",
+            latency_ms=latency_ms,
+            metadata={"claim_count": len(claims), "parallel": True},
+        ))
+        
+    except Exception as e:
+        logger.exception("merge_claim_extraction_error", error=str(e))
+        all_errors.append(f"Claim extraction error: {str(e)}")
+        agent_trace.append(TraceEvent(
+            agent=AgentName.RESEARCHER,
+            action="claim_extraction_error",
+            detail=f"Error extracting claims from merged results: {str(e)[:80]}",
+            metadata={"error": str(e), "parallel": True},
+        ))
+    
+    # Add completion trace
+    agent_trace.append(TraceEvent(
+        agent=AgentName.RESEARCHER,
+        action="merge_complete",
+        detail=f"Merged {len(sorted_results)} results, {len(claims)} claims from parallel tracks",
+        metadata={
+            "result_count": len(sorted_results),
+            "claim_count": len(claims),
+            "source_count": len(source_scores),
+            "parallel": True,
+        },
+    ))
+    
+    # Determine next status
+    next_status = (
+        PipelineStatus.FACT_CHECKING.value
+        if plan and plan.needs_fact_check and claims
+        else PipelineStatus.SYNTHESIZING.value
+    )
+    
+    return {
+        "research_results": sorted_results,
+        "claims": claims,
+        "source_scores": source_scores,
+        "status": next_status,
+        "errors": all_errors,
+        "agent_trace": agent_trace,
+        "parallel_results": [],  # Clear parallel results after merge
+    }

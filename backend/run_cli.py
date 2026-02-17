@@ -8,6 +8,8 @@ Usage:
     python run_cli.py "What is the CAP theorem?"
     python run_cli.py --interactive
     python run_cli.py --hitl "Compare Rust vs Go"
+    python run_cli.py --parallel "Compare React, Vue, and Svelte"
+    python run_cli.py --no-parallel "Simple query"
 """
 
 import argparse
@@ -27,7 +29,7 @@ from rich.table import Table  # noqa: E402
 from rich.markdown import Markdown  # noqa: E402
 
 from graph.workflow import get_workflow, run_research  # noqa: E402
-from graph.state import HITLFeedback, PipelineStatus, VerificationVerdict  # noqa: E402
+from graph.state import HITLFeedback, VerificationVerdict  # noqa: E402
 
 
 console = Console()
@@ -197,19 +199,15 @@ def print_stats(state: dict):
 def _is_workflow_interrupted(state: dict) -> bool:
     """Check if the workflow is interrupted (waiting for HITL review).
     
-    When HITL is enabled, the workflow interrupts after fact_checker.
-    At that point, status is FACT_CHECKING and no report exists yet.
+    When HITL is enabled, the workflow interrupts BEFORE hitl_checkpoint.
+    At that point, fact_checker has completed so we have verification_results
+    but no report yet.
     """
-    status = state.get("status", "")
-    has_report = bool(state.get("report"))
     has_verification = bool(state.get("verification_results"))
+    has_report = bool(state.get("report"))
     
-    # Interrupted if we have verification results but no report and status is fact_checking
-    return (
-        status == PipelineStatus.FACT_CHECKING.value
-        and has_verification
-        and not has_report
-    )
+    # Interrupted if we have verification results but no report
+    return has_verification and not has_report
 
 
 def _display_hitl_review(state: dict):
@@ -257,7 +255,12 @@ def _get_hitl_feedback() -> HITLFeedback:
         if choice == "1":
             return HITLFeedback(action="approve")
         elif choice == "2":
-            topic = console.input("[bold]Topic to explore further:[/bold] ").strip()
+            console.print("[dim]Enter a specific topic or question to research further.[/dim]")
+            console.print("[dim]Example: 'performance benchmarks' or 'memory safety features'[/dim]")
+            topic = console.input("[bold]Topic to explore:[/bold] ").strip()
+            if not topic:
+                console.print("[red]Topic cannot be empty. Please try again.[/red]")
+                continue
             return HITLFeedback(action="dig_deeper", topic=topic)
         elif choice == "3":
             return HITLFeedback(action="abort")
@@ -265,12 +268,17 @@ def _get_hitl_feedback() -> HITLFeedback:
             console.print("[red]Invalid choice. Please enter 1, 2, or 3.[/red]")
 
 
-async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
+async def run_with_progress(
+    query: str,
+    enable_hitl: bool = False,
+    enable_parallel: bool = True,
+) -> dict:
     """Run the research pipeline with live progress display.
     
     Args:
         query: The research query.
         enable_hitl: Whether to enable human-in-the-loop.
+        enable_parallel: Whether to enable parallel sub-query execution.
         
     Returns:
         Final agent state.
@@ -278,6 +286,8 @@ async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
     import uuid
     
     console.print(f"[bold]Query:[/bold] {query}")
+    if enable_parallel:
+        console.print("[dim]Mode: Parallel sub-query execution enabled[/dim]")
     console.print()
     
     thread_id = str(uuid.uuid4())
@@ -294,7 +304,12 @@ async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
         progress.update(task, description="[cyan]Planning research strategy...")
         
         # Run the research
-        result = await run_research(query, thread_id=thread_id, enable_hitl=enable_hitl)
+        result = await run_research(
+            query,
+            thread_id=thread_id,
+            enable_hitl=enable_hitl,
+            enable_parallel=enable_parallel,
+        )
         
         # Check if workflow is interrupted for HITL
         if enable_hitl and _is_workflow_interrupted(result):
@@ -303,7 +318,8 @@ async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
             progress.update(task, description="[green]Complete!")
     
     # Handle HITL review outside of progress context
-    if enable_hitl and _is_workflow_interrupted(result):
+    # Use a while loop to handle multiple rounds (e.g., dig deeper, review, dig deeper again)
+    while enable_hitl and _is_workflow_interrupted(result):
         _display_hitl_review(result)
         feedback = _get_hitl_feedback()
         
@@ -320,13 +336,39 @@ async def run_with_progress(query: str, enable_hitl: bool = False) -> dict:
         ) as progress:
             task = progress.add_task("[cyan]Resuming workflow...", total=None)
             
-            # Get workflow and resume from checkpoint
-            workflow = get_workflow(enable_hitl=enable_hitl)
+            # Get the SAME workflow instance (NOT force_new!) to preserve checkpoint data
+            # The workflow singleton holds the InMemorySaver with our interrupted state
+            workflow = get_workflow(
+                enable_hitl=enable_hitl,
+                enable_parallel=enable_parallel,
+                force_new=False,  # Critical: reuse existing workflow with checkpoint
+            )
             config = {"configurable": {"thread_id": thread_id}}
             
-            # Inject feedback into the checkpointed state and resume
-            # update_state adds values to the existing state, then ainvoke(None) resumes
-            workflow.update_state(config, {"hitl_feedback": feedback})
+            # Handle "dig deeper" action by modifying the plan
+            if feedback.action == "dig_deeper" and feedback.topic:
+                console.print(f"\n[dim]Researching: {feedback.topic}[/dim]")
+                console.print("[dim]This may take 1-2 minutes (planning, research, fact-check)...[/dim]\n")
+                progress.update(task, description=f"[cyan]Planning research for: {feedback.topic[:30]}...")
+                # Update the query in state so planner can create a new plan
+                # Reset iteration count since this is a new user-initiated research
+                workflow.update_state(config, {
+                    "hitl_feedback": feedback,
+                    "query": feedback.topic,
+                    "plan": None,  # Clear old plan to force replanning
+                    "sub_queries": [],
+                    "research_results": [],
+                    "claims": [],
+                    "verification_results": [],  # Clear old verification
+                    "iteration_count": 0,  # Reset for new research
+                })
+            else:
+                console.print("\n[dim]Generating final report...[/dim]\n")
+                progress.update(task, description="[cyan]Synthesizing report...")
+                # Inject feedback into the checkpointed state
+                workflow.update_state(config, {"hitl_feedback": feedback})
+            
+            # Resume workflow
             result = await workflow.ainvoke(None, config)
             progress.update(task, description="[green]Complete!")
     
@@ -373,18 +415,28 @@ async def interactive_mode():
             break
 
 
-async def single_query(query: str, enable_hitl: bool = False, show_trace: bool = True):
+async def single_query(
+    query: str,
+    enable_hitl: bool = False,
+    enable_parallel: bool = True,
+    show_trace: bool = True,
+):
     """Run a single query and display results.
     
     Args:
         query: The research query.
         enable_hitl: Whether to enable human-in-the-loop.
+        enable_parallel: Whether to enable parallel sub-query execution.
         show_trace: Whether to show agent trace summary.
     """
     print_header()
     
     try:
-        result = await run_with_progress(query, enable_hitl=enable_hitl)
+        result = await run_with_progress(
+            query,
+            enable_hitl=enable_hitl,
+            enable_parallel=enable_parallel,
+        )
         
         if show_trace:
             print_trace_summary(result)
@@ -417,6 +469,8 @@ Examples:
   %(prog)s "What is the CAP theorem?"
   %(prog)s --interactive
   %(prog)s --hitl "Compare Rust vs Go for distributed systems"
+  %(prog)s --parallel "Compare React, Vue, and Svelte for SPAs"
+  %(prog)s --no-parallel "Simple factual query"
   %(prog)s --no-trace "Simple factual query"
         """,
     )
@@ -437,6 +491,19 @@ Examples:
         "--hitl",
         action="store_true",
         help="Enable human-in-the-loop checkpoints",
+    )
+    
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=True,
+        help="Enable parallel sub-query execution (default: enabled)",
+    )
+    
+    parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Disable parallel sub-query execution (use sequential)",
     )
     
     parser.add_argument(
@@ -463,6 +530,9 @@ Examples:
             wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO
         )
     
+    # Determine parallel execution setting
+    enable_parallel = not args.no_parallel
+    
     # Run appropriate mode
     if args.interactive:
         asyncio.run(interactive_mode())
@@ -470,6 +540,7 @@ Examples:
         asyncio.run(single_query(
             args.query,
             enable_hitl=args.hitl,
+            enable_parallel=enable_parallel,
             show_trace=not args.no_trace,
         ))
     else:

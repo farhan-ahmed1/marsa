@@ -384,3 +384,188 @@ class TestTraceEvent:
         
         assert event.metadata["claim_id"] == "123"
         assert event.metadata["verdict"] == "supported"
+
+
+# ---------------------------------------------------------------------------
+# Parallel Execution Routing Tests
+# ---------------------------------------------------------------------------
+
+
+class TestParallelRouting:
+    """Tests for parallel sub-query routing."""
+
+    def test_route_sub_queries_parallel_multiple_queries(self):
+        """Test that multiple sub-queries are routed to parallel execution."""
+        from langgraph.types import Send
+        from graph.workflow import route_sub_queries
+        from graph.state import QueryPlan, QueryType, SearchStrategy, ComplexityLevel
+        
+        plan = QueryPlan(
+            query_type=QueryType.COMPARISON,
+            sub_queries=["Query 1", "Query 2", "Query 3"],
+            parallel=True,
+            needs_fact_check=True,
+            search_strategy=SearchStrategy.HYBRID,
+            estimated_complexity=ComplexityLevel.MEDIUM,
+        )
+        
+        state = create_initial_state("Compare A, B, and C")
+        state["plan"] = plan
+        
+        result = route_sub_queries(state)
+        
+        # Should return a list of Send objects
+        assert isinstance(result, list)
+        assert len(result) == 3
+        for send_obj in result:
+            assert isinstance(send_obj, Send)
+            assert send_obj.node == "research_sub_query"
+
+    def test_route_sub_queries_sequential_single_query(self):
+        """Test that single query is routed sequentially."""
+        from graph.workflow import route_sub_queries
+        from graph.state import QueryPlan, QueryType, SearchStrategy, ComplexityLevel
+        
+        plan = QueryPlan(
+            query_type=QueryType.FACTUAL,
+            sub_queries=["Single query"],
+            parallel=False,
+            needs_fact_check=True,
+            search_strategy=SearchStrategy.WEB_ONLY,
+            estimated_complexity=ComplexityLevel.LOW,
+        )
+        
+        state = create_initial_state("What is X?")
+        state["plan"] = plan
+        
+        result = route_sub_queries(state)
+        
+        # Should return string for sequential
+        assert result == "research_sequential"
+
+    def test_route_sub_queries_no_plan(self):
+        """Test routing with no plan returns sequential."""
+        from graph.workflow import route_sub_queries
+        
+        state = create_initial_state("Test query")
+        state["plan"] = None
+        
+        result = route_sub_queries(state)
+        assert result == "research_sequential"
+
+
+# ---------------------------------------------------------------------------
+# HITL Feedback Routing Tests
+# ---------------------------------------------------------------------------
+
+
+class TestHITLRouting:
+    """Tests for human-in-the-loop feedback routing."""
+
+    def test_route_after_hitl_approve(self):
+        """Test that 'approve' action routes to synthesizer."""
+        from graph.workflow import route_after_hitl_feedback
+        from graph.state import HITLFeedback
+        
+        state = create_initial_state("Test query")
+        state["hitl_feedback"] = HITLFeedback(action="approve")
+        state["verification_results"] = []
+        state["iteration_count"] = 0
+        
+        result = route_after_hitl_feedback(state)
+        assert result == "synthesizer"
+
+    def test_route_after_hitl_dig_deeper(self):
+        """Test that 'dig_deeper' action routes to researcher."""
+        from graph.workflow import route_after_hitl_feedback
+        from graph.state import HITLFeedback
+        
+        state = create_initial_state("Test query")
+        state["hitl_feedback"] = HITLFeedback(
+            action="dig_deeper",
+            topic="Performance benchmarks",
+        )
+        state["verification_results"] = []
+        state["iteration_count"] = 0
+        
+        result = route_after_hitl_feedback(state)
+        assert result == "researcher"
+
+    def test_route_after_hitl_abort(self):
+        """Test that 'abort' action routes to end."""
+        from graph.workflow import route_after_hitl_feedback
+        from graph.state import HITLFeedback
+        
+        state = create_initial_state("Test query")
+        state["hitl_feedback"] = HITLFeedback(action="abort")
+        state["verification_results"] = []
+        state["iteration_count"] = 0
+        
+        result = route_after_hitl_feedback(state)
+        assert result == "end"
+
+    def test_route_after_hitl_no_feedback(self):
+        """Test routing without feedback falls back to fact-check routing."""
+        from graph.workflow import route_after_hitl_feedback
+        
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Example",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="",
+        )
+        
+        state = create_initial_state("Test query")
+        state["hitl_feedback"] = None
+        state["verification_results"] = [
+            VerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.SUPPORTED,
+                confidence=0.9,
+                supporting_sources=[],
+                contradicting_sources=[],
+                reasoning="",
+                verification_query="",
+            ),
+        ]
+        state["iteration_count"] = 0
+        
+        result = route_after_hitl_feedback(state)
+        # Should proceed to synthesizer since claims are supported
+        assert result == "synthesizer"
+
+
+# ---------------------------------------------------------------------------
+# Workflow Creation Tests (Parallel Mode)
+# ---------------------------------------------------------------------------
+
+
+class TestParallelWorkflowCreation:
+    """Tests for workflow creation with parallel execution support."""
+
+    def test_create_workflow_with_parallel(self):
+        """Test creating workflow with parallel execution enabled."""
+        from graph.workflow import create_workflow
+        
+        workflow = create_workflow(enable_parallel=True)
+        
+        assert workflow is not None
+        # Should have the parallel research nodes
+        
+    def test_create_workflow_without_parallel(self):
+        """Test creating workflow with parallel execution disabled."""
+        from graph.workflow import create_workflow
+        
+        workflow = create_workflow(enable_parallel=False)
+        
+        assert workflow is not None
+
+    def test_create_workflow_with_hitl_and_parallel(self):
+        """Test creating workflow with both HITL and parallel enabled."""
+        from graph.workflow import create_workflow
+        
+        workflow = create_workflow(enable_hitl=True, enable_parallel=True)
+        
+        assert workflow is not None

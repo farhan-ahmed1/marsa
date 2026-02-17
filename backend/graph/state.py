@@ -7,9 +7,10 @@ The AgentState TypedDict is the main state object that gets passed between
 agents (Planner, Researcher, Fact-Checker, Synthesizer) in the research pipeline.
 """
 
+import operator
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, TypedDict
+from typing import Annotated, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -430,6 +431,29 @@ class HITLFeedback(BaseModel):
     )
 
 
+class SubQueryResult(BaseModel):
+    """Result from researching a single sub-query (parallel execution).
+    
+    Used to aggregate results from parallel sub-query workers.
+    """
+    
+    sub_query: str = Field(
+        description="The sub-query that was researched"
+    )
+    results: list[ResearchResult] = Field(
+        default_factory=list,
+        description="Research results for this sub-query"
+    )
+    trace_events: list[TraceEvent] = Field(
+        default_factory=list,
+        description="Trace events from this sub-query research"
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Errors encountered during this sub-query"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main Agent State (TypedDict for LangGraph)
 # ---------------------------------------------------------------------------
@@ -504,6 +528,10 @@ class AgentState(TypedDict, total=False):
     
     # Timing
     started_at: str
+    
+    # Parallel execution support - uses Annotated with operator.add
+    # to aggregate results from parallel Send branches
+    parallel_results: Annotated[list[dict], operator.add]
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +580,7 @@ def create_initial_state(query: str) -> AgentState:
         errors=[],
         hitl_feedback=None,
         started_at=datetime.now(timezone.utc).isoformat(),
+        parallel_results=[],
     )
 
 

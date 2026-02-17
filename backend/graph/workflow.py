@@ -6,19 +6,25 @@ routing and SQLite checkpointing.
 
 The workflow supports:
 - Sequential execution through all agents
+- Parallel sub-query execution via LangGraph's Send API
 - Conditional looping back to researcher if too many claims fail verification
 - SQLite persistence for state inspection and resumption
 - Human-in-the-loop checkpoints (optional)
 """
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import structlog
 from langgraph.graph import END, StateGraph
+from langgraph.types import Send
 
 from agents.fact_checker import fact_check_node, should_loop_back
 from agents.planner import planner_node
-from agents.researcher import research_node
+from agents.researcher import (
+    merge_research_node,
+    research_node,
+    research_sub_query_node,
+)
 from agents.synthesizer import synthesize_node
 from graph.checkpointer import create_checkpointer
 from graph.state import AgentName, AgentState, PipelineStatus, TraceEvent
@@ -59,6 +65,9 @@ async def planner_with_trace(state: AgentState) -> dict:
     
     # Execute planner
     result = await planner_node({**state, "agent_trace": agent_trace})
+    
+    # Clear hitl_feedback after consuming it (prevents stale feedback in next HITL round)
+    result["hitl_feedback"] = None
     
     # Add completion trace
     plan = result.get("plan")
@@ -132,7 +141,37 @@ async def synthesizer_with_status(state: AgentState) -> dict:
     # Update status before synthesis
     updated_state = {**state, "status": PipelineStatus.SYNTHESIZING.value}
     result = await synthesize_node(updated_state)
+    # Clear hitl_feedback after consuming it
+    result["hitl_feedback"] = None
     return result
+
+
+async def hitl_checkpoint_node(state: AgentState) -> dict:
+    """HITL checkpoint node that processes human feedback.
+    
+    This node runs AFTER the interrupt (we use interrupt_before).
+    At this point, the user has already provided feedback via update_state,
+    so hitl_feedback should be present in the state.
+    
+    We do NOT clear hitl_feedback here because route_after_hitl_feedback
+    needs to read it. The planner node clears it after consuming.
+    
+    Args:
+        state: Current agent state with hitl_feedback from user.
+        
+    Returns:
+        State with status updated (feedback preserved for routing).
+    """
+    feedback = state.get("hitl_feedback")
+    if feedback:
+        action = feedback.action if hasattr(feedback, 'action') else feedback.get('action', '')
+        logger.info("hitl_checkpoint_processing", action=action)
+    else:
+        logger.info("hitl_checkpoint_no_feedback")
+    
+    return {
+        "status": PipelineStatus.AWAITING_FEEDBACK.value,
+    }
 
 
 def route_after_fact_check(state: AgentState) -> Literal["researcher", "synthesizer"]:
@@ -153,52 +192,185 @@ def route_after_fact_check(state: AgentState) -> Literal["researcher", "synthesi
     return route
 
 
+def route_sub_queries(state: AgentState) -> Union[list[Send], Literal["research_sequential"]]:
+    """Route sub-queries for parallel or sequential execution.
+    
+    Uses LangGraph's Send API to fan out sub-queries to parallel workers
+    when the plan indicates parallel execution is appropriate.
+    
+    This is the Spool connection: "Just like Spool fans out tasks across
+    workers, MARSA fans out research sub-queries across parallel agent instances."
+    
+    Args:
+        state: Current agent state with plan containing sub-queries.
+        
+    Returns:
+        List of Send objects for parallel execution, or "research_sequential" literal.
+    """
+    plan = state.get("plan")
+    
+    if not plan or not plan.sub_queries:
+        logger.warning("route_sub_queries_no_plan")
+        return "research_sequential"
+    
+    if plan.parallel and len(plan.sub_queries) >= 2:
+        # Fan out to parallel workers
+        logger.info(
+            "routing_parallel",
+            sub_query_count=len(plan.sub_queries),
+            parallel=True,
+        )
+        return [
+            Send("research_sub_query", {"sub_query": sq, "parent_state": state})
+            for sq in plan.sub_queries
+        ]
+    
+    # Sequential execution
+    logger.info(
+        "routing_sequential",
+        sub_query_count=len(plan.sub_queries),
+        parallel=False,
+    )
+    return "research_sequential"
+
+
+def route_after_hitl_feedback(state: AgentState) -> Literal["planner", "synthesizer", "end"]:
+    """Route based on human-in-the-loop feedback.
+    
+    This function is called AFTER the hitl_checkpoint node and interrupt,
+    so hitl_feedback should always be present in the state.
+    
+    Routing logic:
+    - 'approve' -> proceed to synthesizer
+    - 'dig_deeper' -> loop back to planner with new query
+    - 'abort' -> end the workflow
+    
+    Args:
+        state: Current agent state with hitl_feedback.
+        
+    Returns:
+        Next node to route to.
+    """
+    feedback = state.get("hitl_feedback")
+    
+    if not feedback:
+        # This shouldn't happen - log error and proceed to synthesizer
+        logger.error("hitl_feedback_missing_after_interrupt")
+        return "synthesizer"
+    
+    action = feedback.action if hasattr(feedback, 'action') else feedback.get('action', '')
+    
+    if action == "abort":
+        logger.info("hitl_abort")
+        return "end"
+    elif action == "dig_deeper":
+        logger.info("hitl_dig_deeper", topic=getattr(feedback, 'topic', None))
+        return "planner"  # Go back to planner for new plan
+    else:  # "approve" or default
+        logger.info("hitl_approve")
+        return "synthesizer"
+
+
 def create_workflow(
     checkpointer_path: Optional[str] = None,
     enable_hitl: bool = False,
     use_memory_checkpointer: bool = True,
+    enable_parallel: bool = True,
 ) -> StateGraph:
     """Create the MARSA research workflow graph.
     
     Builds and compiles the LangGraph StateGraph connecting all agents
     with appropriate edges and conditional routing.
     
+    The workflow supports two modes:
+    1. Sequential: planner -> researcher -> fact_checker -> synthesizer
+    2. Parallel: planner -> (fan-out sub-queries) -> merge -> fact_checker -> synthesizer
+    
+    Parallel mode uses LangGraph's Send API to fan out sub-queries across
+    parallel workers, similar to how Spool fans out tasks across workers.
+    
     Args:
         checkpointer_path: Path for SQLite checkpointer. If None, uses default.
         enable_hitl: Whether to enable human-in-the-loop checkpoints.
         use_memory_checkpointer: If True, use InMemorySaver for simplicity.
                                  If False, requires async SQLite handling.
+        enable_parallel: Whether to enable parallel sub-query execution.
         
     Returns:
         Compiled StateGraph ready for invocation.
     """
-    logger.info("creating_workflow", enable_hitl=enable_hitl)
+    logger.info(
+        "creating_workflow",
+        enable_hitl=enable_hitl,
+        enable_parallel=enable_parallel,
+    )
     
     # Create the graph
     workflow = StateGraph(AgentState)
     
-    # Add nodes
+    # Add core nodes
     workflow.add_node("planner", planner_with_trace)
-    workflow.add_node("researcher", researcher_with_status)
     workflow.add_node("fact_checker", fact_checker_with_status)
     workflow.add_node("synthesizer", synthesizer_with_status)
+    
+    # Add HITL checkpoint node if enabled
+    if enable_hitl:
+        workflow.add_node("hitl_checkpoint", hitl_checkpoint_node)
+    
+    # Add research nodes (both parallel and sequential paths)
+    workflow.add_node("research_sequential", researcher_with_status)
+    workflow.add_node("research_sub_query", research_sub_query_node)
+    workflow.add_node("merge_research", merge_research_with_status)
     
     # Set entry point
     workflow.set_entry_point("planner")
     
-    # Add edges
-    workflow.add_edge("planner", "researcher")
-    workflow.add_edge("researcher", "fact_checker")
+    if enable_parallel:
+        # Conditional routing: parallel fan-out or sequential
+        workflow.add_conditional_edges(
+            "planner",
+            route_sub_queries,
+            {
+                "research_sequential": "research_sequential",
+                # Send API handles "research_sub_query" dynamically
+            },
+        )
+        
+        # Parallel sub-queries merge back
+        workflow.add_edge("research_sub_query", "merge_research")
+        
+        # Both paths lead to fact_checker
+        workflow.add_edge("research_sequential", "fact_checker")
+        workflow.add_edge("merge_research", "fact_checker")
+    else:
+        # Simple sequential path
+        workflow.add_edge("planner", "research_sequential")
+        workflow.add_edge("research_sequential", "fact_checker")
     
-    # Conditional edge from fact_checker
-    workflow.add_conditional_edges(
-        "fact_checker",
-        route_after_fact_check,
-        {
-            "researcher": "researcher",
-            "synthesizer": "synthesizer",
-        },
-    )
+    # Conditional edge from fact_checker (with HITL support)
+    if enable_hitl:
+        # Route to HITL checkpoint first
+        workflow.add_edge("fact_checker", "hitl_checkpoint")
+        
+        # Then conditional routing based on feedback (evaluated AFTER interrupt)
+        workflow.add_conditional_edges(
+            "hitl_checkpoint",
+            route_after_hitl_feedback,
+            {
+                "planner": "planner",  # Loop back for dig_deeper (will replan)
+                "synthesizer": "synthesizer",
+                "end": END,
+            },
+        )
+    else:
+        workflow.add_conditional_edges(
+            "fact_checker",
+            route_after_fact_check,
+            {
+                "researcher": "research_sequential",
+                "synthesizer": "synthesizer",
+            },
+        )
     
     # Synthesizer goes to END
     workflow.add_edge("synthesizer", END)
@@ -213,14 +385,30 @@ def create_workflow(
     compile_kwargs = {"checkpointer": checkpointer}
     
     if enable_hitl:
-        # Pause after fact-checking for human review
-        compile_kwargs["interrupt_after"] = ["fact_checker"]
-        logger.info("hitl_enabled", interrupt_after="fact_checker")
+        # Pause BEFORE hitl_checkpoint for human review.
+        # This ensures the routing decision (which reads hitl_feedback)
+        # happens AFTER the user provides feedback via update_state.
+        compile_kwargs["interrupt_before"] = ["hitl_checkpoint"]
+        logger.info("hitl_enabled", interrupt_before="hitl_checkpoint")
     
     app = workflow.compile(**compile_kwargs)
     
-    logger.info("workflow_created")
+    logger.info("workflow_created", enable_parallel=enable_parallel)
     return app
+
+
+async def merge_research_with_status(state: AgentState) -> dict:
+    """Merge research node wrapper that updates status.
+    
+    Args:
+        state: Current agent state with parallel results.
+        
+    Returns:
+        Updated state with merged research results.
+    """
+    updated_state = {**state, "status": PipelineStatus.RESEARCHING.value}
+    result = await merge_research_node(updated_state)
+    return result
 
 
 # Default workflow instance
@@ -230,6 +418,7 @@ _default_workflow: Optional[StateGraph] = None
 def get_workflow(
     checkpointer_path: Optional[str] = None,
     enable_hitl: bool = False,
+    enable_parallel: bool = True,
     force_new: bool = False,
 ) -> StateGraph:
     """Get or create the default workflow instance.
@@ -240,6 +429,7 @@ def get_workflow(
     Args:
         checkpointer_path: Path for SQLite checkpointer.
         enable_hitl: Whether to enable human-in-the-loop.
+        enable_parallel: Whether to enable parallel sub-query execution.
         force_new: Force creation of a new workflow instance.
         
     Returns:
@@ -251,6 +441,7 @@ def get_workflow(
         _default_workflow = create_workflow(
             checkpointer_path=checkpointer_path,
             enable_hitl=enable_hitl,
+            enable_parallel=enable_parallel,
         )
     
     return _default_workflow
@@ -260,6 +451,7 @@ async def run_research(
     query: str,
     thread_id: Optional[str] = None,
     enable_hitl: bool = False,
+    enable_parallel: bool = True,
 ) -> AgentState:
     """Run a research query through the full pipeline.
     
@@ -270,6 +462,7 @@ async def run_research(
         query: The research query to investigate.
         thread_id: Optional thread ID for checkpointing.
         enable_hitl: Whether to enable human-in-the-loop.
+        enable_parallel: Whether to enable parallel sub-query execution.
         
     Returns:
         Final AgentState with the research report.
@@ -281,8 +474,12 @@ async def run_research(
     # Create initial state
     initial_state = create_initial_state(query)
     
-    # Get workflow
-    workflow = get_workflow(enable_hitl=enable_hitl)
+    # Get workflow (force new to ensure correct settings)
+    workflow = get_workflow(
+        enable_hitl=enable_hitl,
+        enable_parallel=enable_parallel,
+        force_new=True,
+    )
     
     # Create config for checkpointing
     config = {
@@ -295,6 +492,7 @@ async def run_research(
         "running_research",
         query=query[:50],
         thread_id=config["configurable"]["thread_id"],
+        enable_parallel=enable_parallel,
     )
     
     # Run the workflow
