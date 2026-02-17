@@ -22,6 +22,7 @@ from agents.fact_checker import (
 from agents.planner import create_query_plan, planner_node
 from agents.researcher import extract_claims, research_node
 from agents.source_scorer import score_source
+from agents.synthesizer import generate_report, synthesize_node
 
 __all__ = [
     # Planner
@@ -37,6 +38,9 @@ __all__ = [
     "should_loop_back",
     "BAD_CLAIM_THRESHOLD",
     "MAX_ITERATIONS",
+    # Synthesizer
+    "synthesize_node",
+    "generate_report",
     # Source Scorer
     "score_source",
 ]

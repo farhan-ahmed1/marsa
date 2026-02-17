@@ -1,5 +1,6 @@
 fastmcp>=0.1.0
 langgraph>=0.2.0
+langgraph-checkpoint-sqlite>=3.0.0
 langchain-core>=0.3.0
 langchain-anthropic>=0.2.0
 langchain-text-splitters>=0.3.0
@@ -15,3 +16,4 @@ pydantic>=2.9.0
 openai>=1.54.0
 tenacity>=9.0.0
 structlog>=24.4.0
+rich>=13.9.0

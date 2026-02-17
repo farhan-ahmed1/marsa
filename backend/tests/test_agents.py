@@ -1737,3 +1737,418 @@ class TestFactCheckerConstants:
     def test_max_iterations_is_2(self):
         """Test that max iterations is 2."""
         assert MAX_ITERATIONS == 2
+
+
+# ---------------------------------------------------------------------------
+# Synthesizer Agent Tests
+# ---------------------------------------------------------------------------
+
+
+from agents.synthesizer import (  # noqa: E402
+    generate_report,
+    synthesize_node,
+    _build_citation_map,
+    _format_claims_for_prompt,
+    _format_report_as_text,
+    _parse_report_response,
+)
+from graph.state import (  # noqa: E402
+    Citation,
+    Report,
+    ReportMetadata,
+    ReportSection,
+)
+
+
+class TestBuildCitationMap:
+    """Tests for _build_citation_map helper function."""
+    
+    @pytest.fixture
+    def sample_verification_results(self):
+        """Create sample verification results for testing."""
+        claims = [
+            Claim(
+                statement="Test claim 1",
+                source_url="https://high-quality.edu/page",
+                source_title="High Quality Source",
+                confidence=ConfidenceLevel.HIGH,
+                category="fact",
+                context="",
+            ),
+            Claim(
+                statement="Test claim 2",
+                source_url="https://medium-quality.com/page",
+                source_title="Medium Quality Source",
+                confidence=ConfidenceLevel.MEDIUM,
+                category="fact",
+                context="",
+            ),
+        ]
+        
+        return [
+            VerificationResult(
+                claim=claims[0],
+                verdict=VerificationVerdict.SUPPORTED,
+                confidence=0.9,
+                supporting_sources=["https://supporting.gov/page"],
+                contradicting_sources=[],
+                reasoning="Verified",
+                verification_query="test",
+            ),
+            VerificationResult(
+                claim=claims[1],
+                verdict=VerificationVerdict.SUPPORTED,
+                confidence=0.8,
+                supporting_sources=[],
+                contradicting_sources=[],
+                reasoning="Verified",
+                verification_query="test",
+            ),
+        ]
+    
+    @pytest.fixture
+    def sample_source_scores(self):
+        """Create sample source scores for testing."""
+        return {
+            "https://high-quality.edu/page": 0.90,
+            "https://medium-quality.com/page": 0.60,
+            "https://supporting.gov/page": 0.95,
+        }
+    
+    def test_builds_citations_sorted_by_quality(
+        self, sample_verification_results, sample_source_scores
+    ):
+        """Test that citations are sorted by quality score (highest first)."""
+        citations, url_to_number = _build_citation_map(
+            sample_verification_results,
+            sample_source_scores,
+        )
+        
+        # Should have 3 unique sources
+        assert len(citations) == 3
+        
+        # First citation should be highest quality
+        assert citations[0].source_quality_score == 0.95
+        assert "supporting.gov" in citations[0].url
+        
+        # URL mapping should be consistent
+        for citation in citations:
+            assert url_to_number[citation.url] == citation.number
+    
+    def test_handles_empty_results(self):
+        """Test that empty verification results produce empty citations."""
+        citations, url_to_number = _build_citation_map([], {})
+        
+        assert citations == []
+        assert url_to_number == {}
+    
+    def test_assigns_default_score_for_unknown_sources(
+        self, sample_verification_results
+    ):
+        """Test that unknown sources get default 0.5 score."""
+        # Empty source scores
+        citations, _ = _build_citation_map(sample_verification_results, {})
+        
+        # All should have default score
+        for citation in citations:
+            assert citation.source_quality_score == 0.5
+
+
+class TestFormatClaimsForPrompt:
+    """Tests for _format_claims_for_prompt helper function."""
+    
+    def test_separates_by_verdict(self):
+        """Test that claims are grouped by verdict."""
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Example",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        results = [
+            VerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.SUPPORTED,
+                confidence=0.9,
+                supporting_sources=[],
+                contradicting_sources=[],
+                reasoning="",
+                verification_query="",
+            ),
+            VerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.CONTRADICTED,
+                confidence=0.8,
+                supporting_sources=[],
+                contradicting_sources=[],
+                reasoning="Was wrong",
+                verification_query="",
+            ),
+            VerificationResult(
+                claim=claim,
+                verdict=VerificationVerdict.UNVERIFIABLE,
+                confidence=0.3,
+                supporting_sources=[],
+                contradicting_sources=[],
+                reasoning="Cannot verify",
+                verification_query="",
+            ),
+        ]
+        
+        _, url_to_citation = _build_citation_map(results, {})
+        formatted = _format_claims_for_prompt(results, {}, url_to_citation)
+        
+        assert "Supported Claims" in formatted
+        assert "Contradicted Claims" in formatted
+        assert "Unverified Claims" in formatted
+
+
+class TestParseReportResponse:
+    """Tests for _parse_report_response helper function."""
+    
+    def test_parses_valid_json(self):
+        """Test parsing a valid JSON response."""
+        response = json.dumps({
+            "title": "Test Report",
+            "summary": "This is a summary.",
+            "sections": [
+                {
+                    "heading": "Introduction",
+                    "content": "Introduction content [1].",
+                    "order": 1,
+                },
+                {
+                    "heading": "Details",
+                    "content": "Details content [2].",
+                    "order": 2,
+                },
+            ],
+            "confidence_summary": "High confidence."
+        })
+        
+        citations = [
+            Citation(
+                number=1,
+                title="Source 1",
+                url="https://example.com/1",
+                source_quality_score=0.8,
+                accessed_date="2026-02-16",
+            ),
+        ]
+        
+        stats = {
+            "total_latency_ms": 100,
+            "llm_calls": 1,
+            "total_tokens": 500,
+            "sources_searched": 5,
+            "claims_verified": 3,
+            "fact_check_pass_rate": 0.9,
+        }
+        
+        report = _parse_report_response(response, "Test query", citations, stats)
+        
+        assert report.title == "Test Report"
+        assert report.summary == "This is a summary."
+        assert len(report.sections) == 2
+        assert report.sections[0].heading == "Introduction"
+        assert report.confidence_summary == "High confidence."
+        assert len(report.citations) == 1
+    
+    def test_parses_json_with_markdown_fences(self):
+        """Test parsing JSON wrapped in markdown code fences."""
+        response = '''```json
+{
+    "title": "Test",
+    "summary": "Summary",
+    "sections": [],
+    "confidence_summary": "OK"
+}
+```'''
+        
+        report = _parse_report_response(response, "query", [], {})
+        
+        assert report.title == "Test"
+    
+    def test_raises_on_invalid_json(self):
+        """Test that invalid JSON raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            _parse_report_response("not valid json", "query", [], {})
+        
+        assert "Invalid JSON" in str(exc_info.value)
+    
+    def test_sections_sorted_by_order(self):
+        """Test that sections are sorted by order field."""
+        response = json.dumps({
+            "title": "Test",
+            "summary": "Summary",
+            "sections": [
+                {"heading": "Third", "content": "c", "order": 3},
+                {"heading": "First", "content": "a", "order": 1},
+                {"heading": "Second", "content": "b", "order": 2},
+            ],
+            "confidence_summary": "OK"
+        })
+        
+        report = _parse_report_response(response, "query", [], {})
+        
+        assert report.sections[0].heading == "First"
+        assert report.sections[1].heading == "Second"
+        assert report.sections[2].heading == "Third"
+
+
+class TestFormatReportAsText:
+    """Tests for _format_report_as_text helper function."""
+    
+    def test_formats_complete_report(self):
+        """Test formatting a complete report."""
+        report = Report(
+            title="Test Report Title",
+            summary="This is the executive summary.",
+            sections=[
+                ReportSection(heading="Intro", content="Intro content", order=1),
+                ReportSection(heading="Body", content="Body content", order=2),
+            ],
+            confidence_summary="High confidence overall.",
+            citations=[
+                Citation(
+                    number=1,
+                    title="Source One",
+                    url="https://example.com/1",
+                    source_quality_score=0.85,
+                    accessed_date="2026-02-16",
+                ),
+            ],
+            metadata=ReportMetadata(query="Test query"),
+        )
+        
+        text = _format_report_as_text(report)
+        
+        assert "# Test Report Title" in text
+        assert "Executive Summary" in text
+        assert "This is the executive summary." in text
+        assert "## Intro" in text
+        assert "## Body" in text
+        assert "Confidence Assessment" in text
+        assert "High confidence overall." in text
+        assert "## References" in text
+        assert "[1] Source One" in text
+        assert "(high quality)" in text
+    
+    def test_handles_empty_report(self):
+        """Test formatting a minimal/empty report."""
+        report = Report(
+            title="Empty",
+            summary="",
+            sections=[],
+            confidence_summary="",
+            citations=[],
+            metadata=ReportMetadata(query=""),
+        )
+        
+        text = _format_report_as_text(report)
+        
+        assert "# Empty" in text
+        # Should not have empty sections
+        assert "Executive Summary" not in text or text.count("\n\n\n") <= 1
+
+
+class TestSynthesizeNode:
+    """Tests for synthesize_node function."""
+    
+    @pytest.fixture
+    def mock_state_with_results(self):
+        """Create a state with verification results for testing."""
+        claim = Claim(
+            statement="Python is an interpreted language",
+            source_url="https://python.org",
+            source_title="Python.org",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="",
+        )
+        
+        return {
+            "query": "What is Python?",
+            "verification_results": [
+                VerificationResult(
+                    claim=claim,
+                    verdict=VerificationVerdict.SUPPORTED,
+                    confidence=0.9,
+                    supporting_sources=["https://python.org"],
+                    contradicting_sources=[],
+                    reasoning="Verified",
+                    verification_query="Python interpreted language",
+                ),
+            ],
+            "source_scores": {"https://python.org": 0.85},
+            "research_results": [],
+            "agent_trace": [],
+            "iteration_count": 1,
+        }
+    
+    @pytest.mark.asyncio
+    async def test_synthesize_node_with_empty_results(self):
+        """Test synthesize_node handles empty verification results."""
+        state = {
+            "query": "Test query",
+            "verification_results": [],
+            "source_scores": {},
+            "research_results": [],
+            "agent_trace": [],
+            "iteration_count": 1,
+        }
+        
+        result = await synthesize_node(state)
+        
+        assert result["status"] == "completed"
+        assert "No" in result["report"] or "no" in result["report"]
+        assert len(result["agent_trace"]) >= 2  # start and skip events
+    
+    @pytest.mark.asyncio
+    async def test_synthesize_node_with_results(self, mock_state_with_results):
+        """Test synthesize_node with actual verification results (mocked LLM)."""
+        mock_response = MagicMock()
+        mock_response.content = json.dumps({
+            "title": "Python Overview",
+            "summary": "Python is an interpreted programming language.",
+            "sections": [
+                {
+                    "heading": "Introduction",
+                    "content": "Python is widely used [1].",
+                    "order": 1,
+                }
+            ],
+            "confidence_summary": "High confidence in findings."
+        })
+        mock_response.usage_metadata = {"total_tokens": 500}
+        
+        with patch("agents.synthesizer._create_llm") as mock_create_llm:
+            mock_llm = MagicMock()
+            mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+            mock_create_llm.return_value = mock_llm
+            
+            result = await synthesize_node(mock_state_with_results)
+        
+        assert result["status"] == "completed"
+        assert "Python" in result["report"]
+        assert result["report_structured"].title == "Python Overview"
+        assert len(result["citations"]) >= 1
+        assert len(result["agent_trace"]) >= 2
+    
+    @pytest.mark.asyncio
+    async def test_synthesize_node_handles_llm_error(self, mock_state_with_results):
+        """Test synthesize_node handles LLM errors gracefully."""
+        with patch("agents.synthesizer._create_llm") as mock_create_llm:
+            mock_llm = MagicMock()
+            mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM API error"))
+            mock_create_llm.return_value = mock_llm
+            
+            result = await synthesize_node(mock_state_with_results)
+        
+        assert result["status"] == "failed"
+        assert len(result["errors"]) > 0
+        assert "Synthesis error" in result["errors"][0]
+
