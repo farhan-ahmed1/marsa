@@ -963,3 +963,777 @@ class TestClaimExtractionPrompt:
         """Test that prompt includes extraction examples."""
         assert "Python" in CLAIM_EXTRACTION_SYSTEM_PROMPT
         assert "CAP theorem" in CLAIM_EXTRACTION_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Fact-Checker Agent Tests
+# ---------------------------------------------------------------------------
+
+from agents.fact_checker import (  # noqa: E402
+    _adjust_confidence_by_source_quality,
+    _parse_verification_response,
+    fact_check_node,
+    generate_verify_query,
+    should_loop_back,
+    verify_claim,
+    BAD_CLAIM_THRESHOLD,
+    MAX_ITERATIONS,
+)
+from graph.state import (  # noqa: E402
+    VerificationResult,
+    VerificationVerdict,
+)
+
+
+class TestParseVerificationResponse:
+    """Tests for _parse_verification_response parsing logic."""
+    
+    def test_parse_valid_supported_verdict(self):
+        """Test parsing a valid supported verdict."""
+        response = json.dumps({
+            "verdict": "supported",
+            "confidence": 0.85,
+            "supporting_sources": ["https://example.com/1", "https://example.com/2"],
+            "contradicting_sources": [],
+            "reasoning": "Multiple sources confirm this claim"
+        })
+        
+        claim = Claim(
+            statement="Python was created by Guido van Rossum",
+            source_url="https://python.org",
+            source_title="Python.org",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="Historical fact about Python",
+        )
+        
+        result = _parse_verification_response(response, claim, "test query")
+        
+        assert result.verdict == VerificationVerdict.SUPPORTED
+        assert result.confidence == 0.85
+        assert len(result.supporting_sources) == 2
+        assert len(result.contradicting_sources) == 0
+        assert "Multiple sources" in result.reasoning
+    
+    def test_parse_contradicted_verdict(self):
+        """Test parsing a contradicted verdict."""
+        response = json.dumps({
+            "verdict": "contradicted",
+            "confidence": 0.9,
+            "supporting_sources": [],
+            "contradicting_sources": ["https://go.dev/doc/"],
+            "reasoning": "Go was released in 2009, not 2015"
+        })
+        
+        claim = Claim(
+            statement="Go was released in 2015",
+            source_url="https://example.com",
+            source_title="Some Blog",
+            confidence=ConfidenceLevel.LOW,
+            category="fact",
+            context="",
+        )
+        
+        result = _parse_verification_response(response, claim, "go release date")
+        
+        assert result.verdict == VerificationVerdict.CONTRADICTED
+        assert result.confidence == 0.9
+        assert len(result.contradicting_sources) == 1
+        assert "2009" in result.reasoning
+    
+    def test_parse_unverifiable_verdict(self):
+        """Test parsing an unverifiable verdict."""
+        response = json.dumps({
+            "verdict": "unverifiable",
+            "confidence": 0.3,
+            "supporting_sources": [],
+            "contradicting_sources": [],
+            "reasoning": "No relevant sources found"
+        })
+        
+        claim = Claim(
+            statement="Some obscure claim",
+            source_url="https://example.com",
+            source_title="Unknown",
+            confidence=ConfidenceLevel.LOW,
+            category="opinion",
+            context="",
+        )
+        
+        result = _parse_verification_response(response, claim, "obscure query")
+        
+        assert result.verdict == VerificationVerdict.UNVERIFIABLE
+        assert result.confidence == 0.3
+    
+    def test_parse_json_with_markdown_fences(self):
+        """Test parsing JSON wrapped in markdown code fences."""
+        response = """```json
+{
+    "verdict": "supported",
+    "confidence": 0.7,
+    "supporting_sources": ["https://source.com"],
+    "contradicting_sources": [],
+    "reasoning": "Found supporting evidence"
+}
+```"""
+        
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = _parse_verification_response(response, claim, "test query")
+        
+        assert result.verdict == VerificationVerdict.SUPPORTED
+        assert result.confidence == 0.7
+    
+    def test_parse_invalid_json_raises_error(self):
+        """Test that invalid JSON raises ValueError."""
+        response = "Not valid JSON at all"
+        
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        with pytest.raises(ValueError) as exc_info:
+            _parse_verification_response(response, claim, "test query")
+        
+        assert "Invalid JSON" in str(exc_info.value)
+    
+    def test_parse_unknown_verdict_defaults_to_unverifiable(self):
+        """Test that unknown verdicts default to unverifiable."""
+        response = json.dumps({
+            "verdict": "unknown_verdict",
+            "confidence": 0.5,
+            "supporting_sources": [],
+            "contradicting_sources": [],
+            "reasoning": "Unknown verdict type"
+        })
+        
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = _parse_verification_response(response, claim, "test query")
+        
+        assert result.verdict == VerificationVerdict.UNVERIFIABLE
+    
+    def test_parse_confidence_clamped_to_valid_range(self):
+        """Test that confidence values are clamped to 0.0-1.0."""
+        response = json.dumps({
+            "verdict": "supported",
+            "confidence": 1.5,  # Out of range
+            "supporting_sources": [],
+            "contradicting_sources": [],
+            "reasoning": "Test"
+        })
+        
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = _parse_verification_response(response, claim, "test query")
+        
+        assert result.confidence == 1.0  # Clamped to max
+    
+    def test_parse_negative_confidence_clamped(self):
+        """Test that negative confidence is clamped to 0.0."""
+        response = json.dumps({
+            "verdict": "contradicted",
+            "confidence": -0.5,  # Negative
+            "supporting_sources": [],
+            "contradicting_sources": [],
+            "reasoning": "Test"
+        })
+        
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = _parse_verification_response(response, claim, "test query")
+        
+        assert result.confidence == 0.0  # Clamped to min
+
+
+class TestAdjustConfidenceBySourceQuality:
+    """Tests for source quality confidence adjustments."""
+    
+    def test_high_quality_sources_boost_confidence(self):
+        """Test that high-quality sources boost verdict confidence."""
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = VerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.SUPPORTED,
+            confidence=0.7,
+            supporting_sources=["https://gov.source1.gov", "https://edu.source2.edu"],
+            contradicting_sources=[],
+            reasoning="High quality sources",
+            verification_query="test",
+        )
+        
+        # High quality scores (0.8+)
+        source_scores = {
+            "https://gov.source1.gov": 0.9,
+            "https://edu.source2.edu": 0.85,
+        }
+        
+        adjusted = _adjust_confidence_by_source_quality(result, source_scores)
+        
+        # Confidence should be boosted
+        assert adjusted.confidence > result.confidence
+    
+    def test_low_quality_sources_reduce_confidence(self):
+        """Test that low-quality sources reduce verdict confidence."""
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = VerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.SUPPORTED,
+            confidence=0.7,
+            supporting_sources=["https://blog1.com", "https://blog2.com"],
+            contradicting_sources=[],
+            reasoning="Low quality sources",
+            verification_query="test",
+        )
+        
+        # Low quality scores (0.4 or below)
+        source_scores = {
+            "https://blog1.com": 0.35,
+            "https://blog2.com": 0.40,
+        }
+        
+        adjusted = _adjust_confidence_by_source_quality(result, source_scores)
+        
+        # Confidence should be reduced
+        assert adjusted.confidence < result.confidence
+    
+    def test_no_relevant_sources_unchanged(self):
+        """Test that result with no relevant sources keeps same confidence."""
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        result = VerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.UNVERIFIABLE,
+            confidence=0.5,
+            supporting_sources=[],
+            contradicting_sources=[],
+            reasoning="No sources found",
+            verification_query="test",
+        )
+        
+        adjusted = _adjust_confidence_by_source_quality(result, {})
+        
+        assert adjusted.confidence == result.confidence
+    
+    def test_confidence_stays_within_bounds(self):
+        """Test that adjusted confidence stays within 0.0-1.0."""
+        claim = Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="",
+        )
+        
+        result = VerificationResult(
+            claim=claim,
+            verdict=VerificationVerdict.SUPPORTED,
+            confidence=0.98,  # Already high
+            supporting_sources=["https://gov.source.gov"],
+            contradicting_sources=[],
+            reasoning="Already confident",
+            verification_query="test",
+        )
+        
+        source_scores = {"https://gov.source.gov": 0.95}
+        
+        adjusted = _adjust_confidence_by_source_quality(result, source_scores)
+        
+        assert adjusted.confidence <= 1.0
+
+
+class TestShouldLoopBack:
+    """Tests for should_loop_back conditional routing."""
+    
+    def _create_claim(self) -> Claim:
+        """Helper to create a test claim."""
+        return Claim(
+            statement="Test claim",
+            source_url="https://example.com",
+            source_title="Test",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+    
+    def _create_result(self, verdict: VerificationVerdict) -> VerificationResult:
+        """Helper to create a test verification result."""
+        return VerificationResult(
+            claim=self._create_claim(),
+            verdict=verdict,
+            confidence=0.5,
+            supporting_sources=[],
+            contradicting_sources=[],
+            reasoning="Test",
+            verification_query="test",
+        )
+    
+    def test_all_supported_proceeds_to_synthesizer(self):
+        """Test that all supported claims proceed to synthesizer."""
+        results = [
+            self._create_result(VerificationVerdict.SUPPORTED)
+            for _ in range(5)
+        ]
+        
+        state = {
+            "verification_results": results,
+            "iteration_count": 0,
+        }
+        
+        assert should_loop_back(state) == "synthesizer"
+    
+    def test_over_30_percent_bad_loops_back(self):
+        """Test that >30% bad claims triggers loop back."""
+        # 4 out of 10 = 40% bad claims
+        results = [
+            self._create_result(VerificationVerdict.SUPPORTED)
+            for _ in range(6)
+        ] + [
+            self._create_result(VerificationVerdict.CONTRADICTED)
+            for _ in range(2)
+        ] + [
+            self._create_result(VerificationVerdict.UNVERIFIABLE)
+            for _ in range(2)
+        ]
+        
+        state = {
+            "verification_results": results,
+            "iteration_count": 0,
+        }
+        
+        assert should_loop_back(state) == "researcher"
+    
+    def test_exactly_30_percent_proceeds_to_synthesizer(self):
+        """Test that exactly 30% bad claims proceeds to synthesizer."""
+        # 3 out of 10 = exactly 30% bad claims (not over threshold)
+        results = [
+            self._create_result(VerificationVerdict.SUPPORTED)
+            for _ in range(7)
+        ] + [
+            self._create_result(VerificationVerdict.CONTRADICTED)
+            for _ in range(3)
+        ]
+        
+        state = {
+            "verification_results": results,
+            "iteration_count": 0,
+        }
+        
+        assert should_loop_back(state) == "synthesizer"
+    
+    def test_max_iterations_prevents_loop_back(self):
+        """Test that max iterations prevents infinite loops."""
+        # All claims are bad, but we've hit max iterations
+        results = [
+            self._create_result(VerificationVerdict.CONTRADICTED)
+            for _ in range(5)
+        ]
+        
+        state = {
+            "verification_results": results,
+            "iteration_count": MAX_ITERATIONS,  # At max
+        }
+        
+        assert should_loop_back(state) == "synthesizer"
+    
+    def test_empty_results_proceeds_to_synthesizer(self):
+        """Test that empty results proceed to synthesizer."""
+        state = {
+            "verification_results": [],
+            "iteration_count": 0,
+        }
+        
+        assert should_loop_back(state) == "synthesizer"
+    
+    def test_iteration_count_below_max_allows_loop_back(self):
+        """Test that iteration count below max allows loop back."""
+        results = [
+            self._create_result(VerificationVerdict.UNVERIFIABLE)
+            for _ in range(10)
+        ]
+        
+        state = {
+            "verification_results": results,
+            "iteration_count": MAX_ITERATIONS - 1,
+        }
+        
+        assert should_loop_back(state) == "researcher"
+
+
+class TestGenerateVerifyQuery:
+    """Tests for generate_verify_query with mocked LLM."""
+    
+    @pytest.fixture
+    def mock_llm(self):
+        """Create a mocked ChatAnthropic instance."""
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock()
+        return llm
+    
+    @pytest.mark.asyncio
+    async def test_generates_different_query(self, mock_llm):
+        """Test that verification query is generated."""
+        mock_llm.ainvoke.return_value.content = "Python programming language creator history origin"
+        
+        claim = Claim(
+            statement="Python was created by Guido van Rossum",
+            source_url="https://python.org",
+            source_title="Python.org",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="Historical fact",
+        )
+        
+        query = await generate_verify_query(claim, llm=mock_llm)
+        
+        assert len(query) > 0
+        assert query == "Python programming language creator history origin"
+        mock_llm.ainvoke.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_handles_list_response(self, mock_llm):
+        """Test handling LLM response as a list."""
+        mock_llm.ainvoke.return_value.content = [
+            {"text": "Go programming language release date 2009"}
+        ]
+        
+        claim = Claim(
+            statement="Go was released in 2009",
+            source_url="https://go.dev",
+            source_title="Go Dev",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="",
+        )
+        
+        query = await generate_verify_query(claim, llm=mock_llm)
+        
+        assert "Go" in query or "2009" in query
+
+
+class TestVerifyClaim:
+    """Tests for verify_claim with mocked LLM."""
+    
+    @pytest.fixture
+    def mock_llm(self):
+        """Create a mocked ChatAnthropic instance."""
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock()
+        return llm
+    
+    @pytest.fixture
+    def sample_claim(self):
+        """Create a sample claim for testing."""
+        return Claim(
+            statement="Python was created by Guido van Rossum",
+            source_url="https://python.org",
+            source_title="Python.org",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="Historical fact about Python's creation",
+        )
+    
+    @pytest.fixture
+    def mock_search_results(self):
+        """Create mock search results."""
+        result1 = MagicMock()
+        result1.url = "https://docs.python.org/faq"
+        result1.title = "Python FAQ"
+        result1.content = "Python was created by Guido van Rossum in 1991"
+        
+        result2 = MagicMock()
+        result2.url = "https://en.wikipedia.org/wiki/Python"
+        result2.title = "Python - Wikipedia"
+        result2.content = "Guido van Rossum began working on Python in the late 1980s"
+        
+        return [result1, result2]
+    
+    @pytest.mark.asyncio
+    async def test_verify_supported_claim(self, mock_llm, sample_claim, mock_search_results):
+        """Test verifying a claim that should be supported."""
+        mock_llm.ainvoke.return_value.content = json.dumps({
+            "verdict": "supported",
+            "confidence": 0.95,
+            "supporting_sources": [
+                "https://docs.python.org/faq",
+                "https://en.wikipedia.org/wiki/Python"
+            ],
+            "contradicting_sources": [],
+            "reasoning": "Multiple authoritative sources confirm Guido created Python"
+        })
+        
+        source_scores = {
+            "https://docs.python.org/faq": 0.85,
+            "https://en.wikipedia.org/wiki/Python": 0.75,
+        }
+        
+        result = await verify_claim(
+            claim=sample_claim,
+            search_results=mock_search_results,
+            source_scores=source_scores,
+            llm=mock_llm,
+            verification_query="Python creator origin",
+        )
+        
+        assert result.verdict == VerificationVerdict.SUPPORTED
+        assert result.confidence >= 0.9
+        assert len(result.supporting_sources) == 2
+    
+    @pytest.mark.asyncio
+    async def test_verify_contradicted_claim(self, mock_llm, mock_search_results):
+        """Test verifying a claim that should be contradicted."""
+        claim = Claim(
+            statement="Go was released in 2015",
+            source_url="https://example.com",
+            source_title="Some Blog",
+            confidence=ConfidenceLevel.LOW,
+            category="fact",
+            context="",
+        )
+        
+        mock_llm.ainvoke.return_value.content = json.dumps({
+            "verdict": "contradicted",
+            "confidence": 0.9,
+            "supporting_sources": [],
+            "contradicting_sources": ["https://go.dev/doc/"],
+            "reasoning": "Go was released in November 2009, not 2015"
+        })
+        
+        source_scores = {"https://go.dev/doc/": 0.85}
+        
+        result = await verify_claim(
+            claim=claim,
+            search_results=mock_search_results,
+            source_scores=source_scores,
+            llm=mock_llm,
+            verification_query="Go release date",
+        )
+        
+        assert result.verdict == VerificationVerdict.CONTRADICTED
+        # Confidence may be adjusted up due to high-quality source (0.85)
+        assert result.confidence >= 0.9
+    
+    @pytest.mark.asyncio
+    async def test_verify_with_no_search_results(self, mock_llm, sample_claim):
+        """Test that empty search results return unverifiable verdict."""
+        result = await verify_claim(
+            claim=sample_claim,
+            search_results=[],
+            source_scores={},
+            llm=mock_llm,
+            verification_query="test query",
+        )
+        
+        assert result.verdict == VerificationVerdict.UNVERIFIABLE
+        assert result.confidence == 0.3
+        assert "No search results" in result.reasoning
+        # LLM should not be called when no results
+        mock_llm.ainvoke.assert_not_called()
+
+
+class TestFactCheckNode:
+    """Tests for fact_check_node LangGraph node function."""
+    
+    @pytest.fixture
+    def sample_claims(self):
+        """Create sample claims for testing."""
+        return [
+            Claim(
+                statement="Python was created by Guido van Rossum",
+                source_url="https://python.org",
+                source_title="Python.org",
+                confidence=ConfidenceLevel.HIGH,
+                category="fact",
+                context="",
+            ),
+            Claim(
+                statement="Python first released in 1991",
+                source_url="https://python.org",
+                source_title="Python.org",
+                confidence=ConfidenceLevel.HIGH,
+                category="fact",
+                context="",
+            ),
+        ]
+    
+    @pytest.mark.asyncio
+    async def test_fact_check_node_no_claims(self):
+        """Test fact_check_node with no claims returns early."""
+        state = {
+            "claims": [],
+            "source_scores": {},
+            "agent_trace": [],
+            "iteration_count": 0,
+        }
+        
+        result = await fact_check_node(state)
+        
+        assert result["verification_results"] == []
+        assert result["iteration_count"] == 1
+        
+        # Should have trace events
+        assert len(result["agent_trace"]) >= 1
+        actions = [e.action for e in result["agent_trace"]]
+        assert "start" in actions
+        assert "skip" in actions
+    
+    @pytest.mark.asyncio
+    async def test_fact_check_node_success(self, sample_claims):
+        """Test fact_check_node with successful verification."""
+        state = {
+            "claims": sample_claims,
+            "source_scores": {},
+            "agent_trace": [],
+            "iteration_count": 0,
+        }
+        
+        with patch("agents.fact_checker.MCPClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_search_result = MagicMock()
+            mock_search_result.url = "https://python.org/faq"
+            mock_search_result.title = "Python FAQ"
+            mock_search_result.content = "Python was created by Guido van Rossum"
+            mock_search_result.published_date = None
+            mock_client.web_search = AsyncMock(return_value=[mock_search_result])
+            mock_client_class.return_value = mock_client
+            
+            with patch("agents.fact_checker.generate_verify_query") as mock_gen_query:
+                mock_gen_query.return_value = "Python creator history"
+                
+                with patch("agents.fact_checker.verify_claim") as mock_verify:
+                    mock_verify.return_value = VerificationResult(
+                        claim=sample_claims[0],
+                        verdict=VerificationVerdict.SUPPORTED,
+                        confidence=0.9,
+                        supporting_sources=["https://python.org/faq"],
+                        contradicting_sources=[],
+                        reasoning="Confirmed by official sources",
+                        verification_query="Python creator history",
+                    )
+                    
+                    result = await fact_check_node(state)
+        
+        assert len(result["verification_results"]) == 2
+        assert result["iteration_count"] == 1
+        
+        # Check trace events
+        trace_events = result["agent_trace"]
+        actions = [e.action for e in trace_events]
+        assert "start" in actions
+        assert "complete" in actions
+    
+    @pytest.mark.asyncio
+    async def test_fact_check_node_handles_errors(self, sample_claims):
+        """Test fact_check_node handles claim verification errors gracefully."""
+        state = {
+            "claims": sample_claims,
+            "source_scores": {},
+            "agent_trace": [],
+            "iteration_count": 0,
+        }
+        
+        with patch("agents.fact_checker.MCPClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.web_search = AsyncMock(side_effect=Exception("API error"))
+            mock_client_class.return_value = mock_client
+            
+            with patch("agents.fact_checker.generate_verify_query") as mock_gen_query:
+                mock_gen_query.return_value = "test query"
+                
+                result = await fact_check_node(state)
+        
+        # Should still return results (unverifiable for failed claims)
+        assert len(result["verification_results"]) == 2
+        for vr in result["verification_results"]:
+            assert vr.verdict == VerificationVerdict.UNVERIFIABLE
+            assert "error" in vr.reasoning.lower()
+    
+    @pytest.mark.asyncio
+    async def test_fact_check_node_mcp_client_error(self, sample_claims):
+        """Test fact_check_node handles MCP client init errors."""
+        state = {
+            "claims": sample_claims,
+            "source_scores": {},
+            "agent_trace": [],
+            "iteration_count": 0,
+            "errors": [],
+        }
+        
+        with patch("agents.fact_checker.MCPClient") as mock_client_class:
+            mock_client_class.side_effect = Exception("Connection failed")
+            
+            result = await fact_check_node(state)
+        
+        assert result["verification_results"] == []
+        assert result["status"] == "failed"
+        assert len(result["errors"]) > 0
+        assert "MCP client" in result["errors"][0]
+
+
+class TestFactCheckerConstants:
+    """Tests for fact-checker constants and thresholds."""
+    
+    def test_bad_claim_threshold_is_30_percent(self):
+        """Test that bad claim threshold is 0.3 (30%)."""
+        assert BAD_CLAIM_THRESHOLD == 0.3
+    
+    def test_max_iterations_is_2(self):
+        """Test that max iterations is 2."""
+        assert MAX_ITERATIONS == 2

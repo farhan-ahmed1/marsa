@@ -199,3 +199,265 @@ class TestResearcherIntegration:
         
         # Should have some trace events even if no results
         assert len(result["agent_trace"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Fact-Checker Integration Tests
+# ---------------------------------------------------------------------------
+
+from agents.fact_checker import (  # noqa: E402
+    fact_check_node,
+    generate_verify_query,
+    should_loop_back,
+    verify_claim,
+)
+from graph.state import (  # noqa: E402
+    Claim,
+    ConfidenceLevel,
+    VerificationVerdict,
+)
+
+
+@pytest.mark.integration
+class TestFactCheckerIntegration:
+    """Integration tests for Fact-Checker agent using real API calls."""
+    
+    @pytest.mark.asyncio
+    async def test_real_generate_verify_query(self):
+        """Test real LLM call to generate verification query."""
+        claim = Claim(
+            statement="Python was created by Guido van Rossum",
+            source_url="https://python.org",
+            source_title="Python.org Official Site",
+            confidence=ConfidenceLevel.HIGH,
+            category="fact",
+            context="Historical fact about Python's creation",
+        )
+        
+        query = await generate_verify_query(claim)
+        
+        # Should return a non-empty query string
+        assert len(query) > 0
+        # Should be different from the original claim
+        assert query.lower() != claim.statement.lower()
+        # Should likely contain Python-related terms
+        assert "python" in query.lower() or "guido" in query.lower()
+    
+    @pytest.mark.asyncio
+    async def test_real_verify_true_claim(self):
+        """Test verifying a claim that is factually true.
+        
+        WARNING: This test makes real API calls to:
+        - Anthropic Claude (verification LLM call)
+        
+        It will consume API quota!
+        """
+        claim = Claim(
+            statement="Python was created by Guido van Rossum",
+            source_url="https://example.com",
+            source_title="Test Source",
+            confidence=ConfidenceLevel.MEDIUM,
+            category="fact",
+            context="",
+        )
+        
+        # Create mock search results with true information
+        class MockSearchResult:
+            def __init__(self, url, title, content):
+                self.url = url
+                self.title = title
+                self.content = content
+        
+        search_results = [
+            MockSearchResult(
+                url="https://docs.python.org/3/faq/general.html",
+                title="Python General FAQ",
+                content="Python was created by Guido van Rossum. Guido began working on Python in the late 1980s at Centrum Wiskunde & Informatica (CWI) in the Netherlands.",
+            ),
+            MockSearchResult(
+                url="https://en.wikipedia.org/wiki/Python_(programming_language)",
+                title="Python (programming language) - Wikipedia",
+                content="Python was conceived in the late 1980s by Guido van Rossum at CWI. The implementation began in December 1989.",
+            ),
+        ]
+        
+        source_scores = {
+            "https://docs.python.org/3/faq/general.html": 0.85,
+            "https://en.wikipedia.org/wiki/Python_(programming_language)": 0.75,
+        }
+        
+        result = await verify_claim(
+            claim=claim,
+            search_results=search_results,
+            source_scores=source_scores,
+            verification_query="Python programming language creator origin",
+        )
+        
+        # This true claim should be supported
+        assert result.verdict == VerificationVerdict.SUPPORTED
+        assert result.confidence >= 0.7
+        assert len(result.reasoning) > 0
+    
+    @pytest.mark.asyncio
+    async def test_real_verify_false_claim(self):
+        """Test verifying a claim that is factually false.
+        
+        WARNING: This test makes real API calls to:
+        - Anthropic Claude (verification LLM call)
+        
+        It will consume API quota!
+        """
+        claim = Claim(
+            statement="Go was released in 2015",
+            source_url="https://example.com",
+            source_title="Test Source",
+            confidence=ConfidenceLevel.LOW,
+            category="fact",
+            context="",
+        )
+        
+        # Create mock search results with correct information
+        class MockSearchResult:
+            def __init__(self, url, title, content):
+                self.url = url
+                self.title = title
+                self.content = content
+        
+        search_results = [
+            MockSearchResult(
+                url="https://go.dev/doc/faq",
+                title="Go FAQ",
+                content="Go was first publicly announced in November 2009. The first stable release, Go 1, was released in March 2012.",
+            ),
+            MockSearchResult(
+                url="https://en.wikipedia.org/wiki/Go_(programming_language)",
+                title="Go (programming language) - Wikipedia",
+                content="Go is a statically typed language designed at Google by Robert Griesemer, Rob Pike, and Ken Thompson. It was released as open source in November 2009.",
+            ),
+        ]
+        
+        source_scores = {
+            "https://go.dev/doc/faq": 0.85,
+            "https://en.wikipedia.org/wiki/Go_(programming_language)": 0.75,
+        }
+        
+        result = await verify_claim(
+            claim=claim,
+            search_results=search_results,
+            source_scores=source_scores,
+            verification_query="Go programming language release date",
+        )
+        
+        # This false claim should be contradicted (Go was released in 2009, not 2015)
+        assert result.verdict == VerificationVerdict.CONTRADICTED
+        assert result.confidence >= 0.7
+        assert "2009" in result.reasoning.lower() or "contradicted" in result.reasoning.lower()
+    
+    @pytest.mark.asyncio
+    async def test_real_fact_check_node_simple(self):
+        """Test real fact_check_node with actual API calls.
+        
+        WARNING: This test makes real API calls to:
+        - Anthropic Claude (query generation + verification)
+        - Tavily (web search)
+        
+        It will consume API quota!
+        """
+        claims = [
+            Claim(
+                statement="Python was created by Guido van Rossum",
+                source_url="https://python.org",
+                source_title="Python.org",
+                confidence=ConfidenceLevel.HIGH,
+                category="fact",
+                context="Historical fact",
+            ),
+        ]
+        
+        state: AgentState = {
+            "claims": claims,
+            "source_scores": {},
+            "agent_trace": [],
+            "iteration_count": 0,
+        }
+        
+        result = await fact_check_node(state)
+        
+        # Verify result structure
+        assert "verification_results" in result
+        assert "source_scores" in result
+        assert "agent_trace" in result
+        assert "iteration_count" in result
+        
+        # Should have verification results
+        assert len(result["verification_results"]) == 1
+        
+        # The true claim should likely be supported
+        vr = result["verification_results"][0]
+        assert vr.verdict in [
+            VerificationVerdict.SUPPORTED,
+            VerificationVerdict.UNVERIFIABLE,  # May be unverifiable if search fails
+        ]
+        assert vr.claim.statement == claims[0].statement
+        
+        # Should have trace events
+        assert len(result["agent_trace"]) > 0
+        actions = [e.action for e in result["agent_trace"]]
+        assert "start" in actions
+    
+    @pytest.mark.asyncio
+    async def test_should_loop_back_with_bad_claims(self):
+        """Test loop-back logic with injected bad claims.
+        
+        This test verifies that when >30% of claims are bad,
+        the system correctly routes back to the researcher.
+        """
+        from graph.state import VerificationResult
+        
+        def create_claim(statement: str) -> Claim:
+            return Claim(
+                statement=statement,
+                source_url="https://example.com",
+                source_title="Test",
+                confidence=ConfidenceLevel.MEDIUM,
+                category="fact",
+                context="",
+            )
+        
+        def create_result(claim: Claim, verdict: VerificationVerdict) -> VerificationResult:
+            return VerificationResult(
+                claim=claim,
+                verdict=verdict,
+                confidence=0.5,
+                supporting_sources=[],
+                contradicting_sources=[],
+                reasoning="Test",
+                verification_query="test",
+            )
+        
+        # Create 50% bad claims (should trigger loop-back)
+        claims = [
+            create_claim("True claim 1"),
+            create_claim("True claim 2"),
+            create_claim("False claim 1"),
+            create_claim("False claim 2"),
+        ]
+        
+        verification_results = [
+            create_result(claims[0], VerificationVerdict.SUPPORTED),
+            create_result(claims[1], VerificationVerdict.SUPPORTED),
+            create_result(claims[2], VerificationVerdict.CONTRADICTED),
+            create_result(claims[3], VerificationVerdict.UNVERIFIABLE),
+        ]
+        
+        state: AgentState = {
+            "verification_results": verification_results,
+            "iteration_count": 0,
+        }
+        
+        # 50% bad should trigger loop-back
+        assert should_loop_back(state) == "researcher"
+        
+        # At max iterations, should proceed to synthesizer
+        state["iteration_count"] = 2
+        assert should_loop_back(state) == "synthesizer"
