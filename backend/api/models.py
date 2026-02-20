@@ -253,13 +253,14 @@ class SSEEventType(str, Enum):
     
     CONNECTED = "connected"
     AGENT_STARTED = "agent_started"
+    AGENT_COMPLETED = "agent_completed"  # Individual agent finished its work
     TOOL_CALLED = "tool_called"
     TOOL_RESULT = "tool_result"
     CLAIM_EXTRACTED = "claim_extracted"
     CLAIM_VERIFIED = "claim_verified"
     REPORT_GENERATING = "report_generating"
     HITL_CHECKPOINT = "hitl_checkpoint"
-    COMPLETE = "complete"
+    COMPLETE = "complete"  # Workflow-level completion with report
     ERROR = "error"
     HEARTBEAT = "heartbeat"
 

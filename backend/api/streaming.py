@@ -59,7 +59,14 @@ class EventQueueManager:
         async with self._lock:
             if stream_id in self._queues:
                 logger.warning("stream_already_exists", stream_id=stream_id)
+                # Don't clear state if stream exists - preserve it for resumption
+                # Only create new queue for new events
+                queue: asyncio.Queue[SSEEvent] = asyncio.Queue()
+                self._queues[stream_id] = queue
+                # Keep existing state and workflow
+                return queue
             
+            # New stream - initialize everything
             queue: asyncio.Queue[SSEEvent] = asyncio.Queue()
             self._queues[stream_id] = queue
             self._states[stream_id] = {}
@@ -198,10 +205,44 @@ async def stream_agent_events(stream_id: str) -> AsyncGenerator[str, None]:
         # Check if state exists (stream completed)
         state = await event_queue_manager.get_state(stream_id)
         if state:
-            # Send final state as complete event
+            # Build metrics
+            metrics = {
+                "claims_count": len(state.get("claims", [])),
+                "verification_count": len(state.get("verification_results", [])),
+                "citations_count": len(state.get("citations", [])),
+                "trace_events_count": len(state.get("agent_trace", [])),
+                "iteration_count": state.get("iteration_count", 0),
+            }
+            
+            # Calculate fact-check pass rate
+            verification_results = state.get("verification_results", [])
+            if verification_results:
+                supported = sum(
+                    1 for v in verification_results
+                    if getattr(v, "verdict", None) == "supported" or 
+                    (isinstance(v, dict) and v.get("verdict") == "supported")
+                )
+                metrics["fact_check_pass_rate"] = supported / len(verification_results)
+            
+            # Get report and convert to dict if it's a Pydantic model
+            report_structured = state.get("report_structured")
+            report_dict = None
+            if report_structured:
+                if hasattr(report_structured, "model_dump"):
+                    report_dict = report_structured.model_dump()
+                else:
+                    report_dict = report_structured
+            
+            # Send final state as complete event with full report data
             yield SSEEvent(
                 type=SSEEventType.COMPLETE,
-                data={"status": state.get("status", "completed")},
+                data={
+                    "status": state.get("status", "completed"),
+                    "report": report_dict,
+                    "raw_report": state.get("report"),
+                    "metrics": metrics,
+                    "report_available": bool(report_dict),
+                },
                 stream_id=stream_id,
             ).to_sse_format()
             return
@@ -302,6 +343,8 @@ def trace_event_to_sse(trace: TraceEvent, stream_id: str) -> SSEEvent:
         SSEEvent for streaming.
     """
     # Map trace actions to SSE event types
+    # Note: Agent "complete" actions become AGENT_COMPLETED to distinguish
+    # from workflow-level COMPLETE events (which include the report)
     action_mapping = {
         "start": SSEEventType.AGENT_STARTED,
         "tool_call": SSEEventType.TOOL_CALLED,
@@ -309,7 +352,7 @@ def trace_event_to_sse(trace: TraceEvent, stream_id: str) -> SSEEvent:
         "claim_extracted": SSEEventType.CLAIM_EXTRACTED,
         "claim_verified": SSEEventType.CLAIM_VERIFIED,
         "report_generating": SSEEventType.REPORT_GENERATING,
-        "complete": SSEEventType.COMPLETE,
+        "complete": SSEEventType.AGENT_COMPLETED,  # Agent-level complete, not workflow complete
         "error": SSEEventType.ERROR,
     }
     
@@ -448,21 +491,104 @@ async def run_workflow_with_streaming(
     
     # If we completed successfully without HITL interrupt
     if final_state:
+        # Ensure final state is saved to event_queue_manager before sending complete event
+        await event_queue_manager.update_state(stream_id, final_state)
+        
+        # Give a small delay to ensure any async operations complete
+        await asyncio.sleep(0.1)
+        
         status = final_state.get("status", PipelineStatus.COMPLETED.value)
         
-        if status != PipelineStatus.AWAITING_FEEDBACK.value:
-            # Send completion event
+        # Check if we hit HITL checkpoint (workflow interrupted before hitl_checkpoint node)
+        # Status will be "fact_checking" because hitl_checkpoint node hasn't run yet
+        if enable_hitl and status == PipelineStatus.FACT_CHECKING.value:
+            # Workflow paused for HITL checkpoint
+            logger.info("workflow_paused_for_hitl", stream_id=stream_id, status=status)
+            
+            # Send HITL checkpoint event to frontend
+            await event_queue_manager.push_event(
+                stream_id,
+                SSEEvent(
+                    type=SSEEventType.HITL_CHECKPOINT,
+                    data={
+                        "status": "awaiting_feedback",
+                        "message": "Review required before proceeding",
+                        "claims_count": len(final_state.get("claims", [])),
+                        "verified_count": len(final_state.get("verification_results", [])),
+                    },
+                ),
+            )
+            
+            # Update state to awaiting_feedback so /feedback endpoint accepts submission
+            final_state = {**final_state, "status": PipelineStatus.AWAITING_FEEDBACK.value}
+            await event_queue_manager.update_state(stream_id, final_state)
+            logger.info("state_updated_to_awaiting_feedback", stream_id=stream_id)
+        
+        # Only send complete event if workflow actually completed or hit HITL checkpoint
+        # Do not send complete if still in intermediate states (planning, researching, fact_checking)
+        elif status == PipelineStatus.AWAITING_FEEDBACK.value:
+            # HITL checkpoint was already sent in the astream_events loop above
+            pass
+        elif status in (
+            PipelineStatus.COMPLETED.value,
+            PipelineStatus.FAILED.value,
+            PipelineStatus.SYNTHESIZING.value,  # Synthesizer in progress
+            "completed",
+            "failed",
+            "synthesizing",
+        ):
+            # Build metrics for the complete event
+            metrics = {
+                "claims_count": len(final_state.get("claims", [])),
+                "verification_count": len(final_state.get("verification_results", [])),
+                "citations_count": len(final_state.get("citations", [])),
+                "trace_events_count": len(final_state.get("agent_trace", [])),
+                "iteration_count": final_state.get("iteration_count", 0),
+            }
+            
+            # Calculate fact-check pass rate
+            verification_results = final_state.get("verification_results", [])
+            if verification_results:
+                supported = sum(
+                    1 for v in verification_results
+                    if getattr(v, "verdict", None) == "supported" or 
+                    (isinstance(v, dict) and v.get("verdict") == "supported")
+                )
+                metrics["fact_check_pass_rate"] = supported / len(verification_results)
+            
+            # Get report and convert to dict if it's a Pydantic model
+            report_structured = final_state.get("report_structured")
+            report_dict = None
+            if report_structured:
+                if hasattr(report_structured, "model_dump"):
+                    report_dict = report_structured.model_dump()
+                else:
+                    report_dict = report_structured
+            
+            # Send completion event with full report data
             await event_queue_manager.push_event(
                 stream_id,
                 SSEEvent(
                     type=SSEEventType.COMPLETE,
                     data={
                         "status": status,
-                        "report_available": bool(final_state.get("report")),
+                        "report_available": bool(report_dict),
+                        "report": report_dict,
+                        "raw_report": final_state.get("report"),
+                        "metrics": metrics,
                         "total_claims": len(final_state.get("claims", [])),
                         "citations_count": len(final_state.get("citations", [])),
                     },
                 ),
+            )
+        else:
+            # Workflow is in intermediate state (planning, researching, fact_checking)
+            # This means it was interrupted - do not send complete event
+            logger.info(
+                "workflow_interrupted",
+                stream_id=stream_id,
+                status=status,
+                message="Workflow interrupted in intermediate state, not sending complete event"
             )
     
     return final_state
@@ -507,10 +633,15 @@ async def resume_workflow_with_streaming(
         correction=feedback.get("correction"),
     )
     
+    # Get current state for logging
+    current_state = await event_queue_manager.get_state(stream_id)
+    
     logger.info(
         "workflow_resuming",
         stream_id=stream_id,
         action=hitl_feedback.action,
+        has_existing_state=bool(current_state),
+        current_query=current_state.get("query", "")[:50] if current_state else "none",
     )
     
     # Push resuming event
@@ -532,10 +663,16 @@ async def resume_workflow_with_streaming(
         {"hitl_feedback": hitl_feedback},
     )
     
+    # Verify state after update
+    updated_state = await event_queue_manager.get_state(stream_id)
     last_trace_count = 0
-    current_state = await event_queue_manager.get_state(stream_id)
-    if current_state:
-        last_trace_count = len(current_state.get("agent_trace", []))
+    if updated_state:
+        last_trace_count = len(updated_state.get("agent_trace", []))
+        logger.info(
+            "state_after_feedback_update",
+            query_preserved=bool(updated_state.get("query")),
+            trace_count=last_trace_count,
+        )
     
     final_state = None
     
@@ -574,16 +711,53 @@ async def resume_workflow_with_streaming(
     
     # Send completion event
     if final_state:
+        # Ensure final state is saved to event_queue_manager before sending complete event
+        await event_queue_manager.update_state(stream_id, final_state)
+        
+        # Give a small delay to ensure any async operations complete
+        await asyncio.sleep(0.1)
+        
         status = final_state.get("status", PipelineStatus.COMPLETED.value)
         
         if status != PipelineStatus.AWAITING_FEEDBACK.value:
+            # Build metrics for the complete event
+            metrics = {
+                "claims_count": len(final_state.get("claims", [])),
+                "verification_count": len(final_state.get("verification_results", [])),
+                "citations_count": len(final_state.get("citations", [])),
+                "trace_events_count": len(final_state.get("agent_trace", [])),
+                "iteration_count": final_state.get("iteration_count", 0),
+            }
+            
+            # Calculate fact-check pass rate
+            verification_results = final_state.get("verification_results", [])
+            if verification_results:
+                supported = sum(
+                    1 for v in verification_results
+                    if getattr(v, "verdict", None) == "supported" or 
+                    (isinstance(v, dict) and v.get("verdict") == "supported")
+                )
+                metrics["fact_check_pass_rate"] = supported / len(verification_results)
+            
+            # Get report and convert to dict if it's a Pydantic model
+            report_structured = final_state.get("report_structured")
+            report_dict = None
+            if report_structured:
+                if hasattr(report_structured, "model_dump"):
+                    report_dict = report_structured.model_dump()
+                else:
+                    report_dict = report_structured
+            
             await event_queue_manager.push_event(
                 stream_id,
                 SSEEvent(
                     type=SSEEventType.COMPLETE,
                     data={
                         "status": status,
-                        "report_available": bool(final_state.get("report")),
+                        "report_available": bool(report_dict),
+                        "report": report_dict,
+                        "raw_report": final_state.get("report"),
+                        "metrics": metrics,
                     },
                 ),
             )

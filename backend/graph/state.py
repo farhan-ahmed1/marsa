@@ -92,6 +92,7 @@ class PipelineStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     AWAITING_FEEDBACK = "awaiting_feedback"  # HITL checkpoint
+    RESUMING = "resuming"  # Workflow is resuming after HITL feedback
 
 
 # ---------------------------------------------------------------------------

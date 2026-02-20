@@ -4,14 +4,18 @@ export type AgentName = "planner" | "researcher" | "fact_checker" | "synthesizer
 
 export type EventType =
   | "agent_started"
+  | "agent_completed"  // Individual agent finished its work
   | "tool_called"
   | "tool_result"
   | "claim_extracted"
   | "claim_verified"
   | "report_generating"
   | "checkpoint"
-  | "complete"
-  | "error";
+  | "hitl_checkpoint"  // HITL checkpoint (workflow paused)
+  | "complete"  // Workflow-level completion with report
+  | "error"
+  | "heartbeat"  // Keep-alive heartbeat
+  | "connected";  // Initial connection
 
 export interface TraceEvent {
   id: string;
@@ -23,6 +27,7 @@ export interface TraceEvent {
   tokens_used?: number;
   tool?: string;
   type: EventType;
+  data?: any; // Additional event data (e.g., report data on complete event)
 }
 
 export interface QuerySubmission {
@@ -58,6 +63,51 @@ export interface VerificationClaim {
   claim: string;
   ok: boolean;
 }
+
+// Detailed verification result (matching backend schema)
+export interface VerificationResult {
+  claim: {
+    statement: string;
+    source_url: string;
+    source_title: string;
+    confidence: "high" | "medium" | "low";
+    category: string;
+  };
+  verdict: "supported" | "contradicted" | "unverifiable";
+  confidence: number;
+  supporting_sources: string[];
+  contradicting_sources: string[];
+  reasoning: string;
+}
+
+// HITL checkpoint data
+export interface HITLCheckpoint {
+  summary: string;
+  claims: VerificationResult[];
+  source_quality: number;
+}
+
+// Report response from API
+export interface ReportResponse {
+  stream_id: string;
+  status: string;
+  report: Report | null;
+  raw_report: string | null;
+  metrics: {
+    claims_count?: number;
+    verification_count?: number;
+    citations_count?: number;
+    trace_events_count?: number;
+    iteration_count?: number;
+    fact_check_pass_rate?: number;
+    total_latency_ms?: number;
+    total_tokens?: number;
+  };
+  error: string | null;
+}
+
+// Feedback action types
+export type FeedbackAction = "approve" | "dig_deeper" | "correct" | "abort";
 
 // Design system colors for component styling
 export const DS = {

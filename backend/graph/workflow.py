@@ -15,6 +15,7 @@ The workflow supports:
 from typing import Literal, Optional, Union
 
 import structlog
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
@@ -126,6 +127,7 @@ async def fact_checker_with_status(state: AgentState) -> dict:
     # Update status before fact-checking
     updated_state = {**state, "status": PipelineStatus.FACT_CHECKING.value}
     result = await fact_check_node(updated_state)
+    # Status remains as FACT_CHECKING - routing logic will determine next step
     return result
 
 
@@ -165,10 +167,12 @@ async def hitl_checkpoint_node(state: AgentState) -> dict:
     feedback = state.get("hitl_feedback")
     if feedback:
         action = feedback.action if hasattr(feedback, 'action') else feedback.get('action', '')
-        logger.info("hitl_checkpoint_processing", action=action)
+        logger.info("hitl_checkpoint_processing", action=action, has_query=bool(state.get("query")))
     else:
-        logger.info("hitl_checkpoint_no_feedback")
+        logger.info("hitl_checkpoint_no_feedback", has_query=bool(state.get("query")))
     
+    # Return only status update - LangGraph will merge with existing state
+    # This preserves query, plan, claims, etc.
     return {
         "status": PipelineStatus.AWAITING_FEEDBACK.value,
     }
@@ -375,11 +379,16 @@ def create_workflow(
     # Synthesizer goes to END
     workflow.add_edge("synthesizer", END)
     
-    # Create checkpointer (InMemorySaver by default for simplicity)
-    checkpointer = create_checkpointer(
-        db_path=checkpointer_path, 
-        use_memory=use_memory_checkpointer,
-    )
+    # Get checkpointer - use shared singleton for memory mode (CRITICAL for HITL)
+    if use_memory_checkpointer:
+        checkpointer = get_shared_checkpointer()
+        logger.info("using_shared_memory_checkpointer")
+    else:
+        # Note: SQLite checkpointer requires async context manager handling
+        checkpointer = create_checkpointer(
+            db_path=checkpointer_path, 
+            use_memory=False,
+        )
     
     # Compile with optional HITL
     compile_kwargs = {"checkpointer": checkpointer}
@@ -409,6 +418,28 @@ async def merge_research_with_status(state: AgentState) -> dict:
     updated_state = {**state, "status": PipelineStatus.RESEARCHING.value}
     result = await merge_research_node(updated_state)
     return result
+
+
+# Shared checkpointer instance - CRITICAL for HITL resume to work
+# Each InMemorySaver must be the SAME instance across initial run and resume
+_shared_memory_checkpointer: Optional[InMemorySaver] = None
+
+
+def get_shared_checkpointer() -> InMemorySaver:
+    """Get or create the shared memory checkpointer.
+    
+    CRITICAL: For HITL workflow resumption to work, the same checkpointer
+    instance must be used for both the initial workflow run and the resume.
+    Creating a new InMemorySaver for each workflow would lose all state.
+    
+    Returns:
+        The shared InMemorySaver instance.
+    """
+    global _shared_memory_checkpointer
+    if _shared_memory_checkpointer is None:
+        _shared_memory_checkpointer = InMemorySaver()
+        logger.info("shared_checkpointer_created")
+    return _shared_memory_checkpointer
 
 
 # Default workflow instance

@@ -288,6 +288,7 @@ async def submit_feedback(
     state = await event_queue_manager.get_state(stream_id)
     
     if state is None:
+        logger.warning("feedback_stream_not_found", stream_id=stream_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Stream {stream_id} not found",
@@ -295,8 +296,40 @@ async def submit_feedback(
     
     pipeline_status = state.get("status", "")
     
-    # Only accept feedback when at HITL checkpoint
-    if pipeline_status != PipelineStatus.AWAITING_FEEDBACK.value:
+    logger.info(
+        "feedback_request_received",
+        stream_id=stream_id,
+        action=request.action,
+        current_status=pipeline_status,
+    )
+    
+    # Check if a resume is already in progress
+    existing_task = event_queue_manager.get_workflow_task(stream_id)
+    if existing_task is not None and not existing_task.done():
+        logger.warning(
+            "feedback_resume_already_in_progress",
+            stream_id=stream_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Workflow resume already in progress. Please wait.",
+        )
+    
+    # Only accept feedback when at HITL checkpoint or fact-checking (interrupt before hitl node)
+    # When HITL is enabled, the workflow interrupts before the hitl_checkpoint node runs,
+    # so the status might still be "fact_checking" instead of "awaiting_feedback"
+    if pipeline_status not in (
+        PipelineStatus.AWAITING_FEEDBACK.value,
+        PipelineStatus.FACT_CHECKING.value,  # Interrupted at HITL checkpoint
+        "awaiting_feedback",
+        "fact_checking",
+    ):
+        logger.warning(
+            "feedback_invalid_status",
+            stream_id=stream_id,
+            current_status=pipeline_status,
+            expected="awaiting_feedback or fact_checking",
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Not at HITL checkpoint. Current status: {pipeline_status}",
@@ -323,6 +356,11 @@ async def submit_feedback(
     
     # Get original settings
     settings = _query_settings.get(stream_id, {})
+    
+    # Update status immediately to RESUMING to prevent duplicate submissions
+    state["status"] = PipelineStatus.RESUMING.value
+    await event_queue_manager.update_state(stream_id, state)
+    logger.info("feedback_status_set_to_resuming", stream_id=stream_id)
     
     # Recreate event queue for resumption
     await event_queue_manager.create_stream(stream_id)
