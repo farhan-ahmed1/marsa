@@ -191,7 +191,7 @@ function HomePageContent() {
         </div>
         <div className="flex items-center gap-2">
           <a
-            href="https://github.com/farhan/marsa"
+            href="https://github.com/farhan-ahmed1/marsa"
             target="_blank"
             rel="noopener noreferrer"
             title="View on GitHub"
