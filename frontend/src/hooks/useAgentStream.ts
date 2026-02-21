@@ -8,6 +8,31 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // Timeout warning after 60 seconds of no events
 const EVENT_TIMEOUT_MS = 60000;
 
+let eventIdCounter = 0;
+
+/**
+ * Normalize an SSE payload into a flat TraceEvent.
+ *
+ * The backend sends events shaped as { type, data: { agent, action, detail, ... }, timestamp }.
+ * The frontend TraceEvent expects those fields at the top level. This function
+ * hoists nested data fields so downstream code can always read event.agent, etc.
+ */
+function normalizeEvent(raw: Record<string, any>): TraceEvent {
+  const data = raw.data && typeof raw.data === "object" ? raw.data : {};
+  return {
+    id: raw.id || `evt-${++eventIdCounter}`,
+    type: raw.type || data.type || "tool_result",
+    agent: raw.agent || data.agent || "system",
+    action: raw.action || data.action || "",
+    detail: raw.detail || data.detail || "",
+    timestamp: raw.timestamp || new Date().toISOString(),
+    latency_ms: raw.latency_ms ?? data.latency_ms,
+    tokens_used: raw.tokens_used ?? data.tokens_used,
+    tool: raw.tool || data.tool,
+    data: data,
+  };
+}
+
 interface HITLCheckpointData {
   summary: string;
   claims: VerificationResult[];
@@ -22,6 +47,7 @@ interface UseAgentStreamReturn {
   hitlCheckpoint: HITLCheckpointData | null;
   report: Report | null;
   reset: () => void;
+  reconnect: () => void;
 }
 
 export function useAgentStream(streamId: string | null): UseAgentStreamReturn {
@@ -31,6 +57,9 @@ export function useAgentStream(streamId: string | null): UseAgentStreamReturn {
   const [isTimedOut, setIsTimedOut] = useState(false);
   const [hitlCheckpoint, setHitlCheckpoint] = useState<HITLCheckpointData | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  // Incrementing connectionId forces the SSE useEffect to re-run and open
+  // a new EventSource even when streamId has not changed (e.g. after HITL feedback).
+  const [connectionId, setConnectionId] = useState(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastEventTimeRef = useRef<number>(Date.now());
 
@@ -45,6 +74,19 @@ export function useAgentStream(streamId: string | null): UseAgentStreamReturn {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+  }, []);
+
+  /**
+   * Reconnect to the SSE stream for the same streamId.
+   * Used after HITL feedback submission so the frontend can
+   * receive events from the resumed workflow.
+   */
+  const reconnect = useCallback(() => {
+    setStatus("running");
+    setError(null);
+    setIsTimedOut(false);
+    setHitlCheckpoint(null);
+    setConnectionId((prev) => prev + 1);
   }, []);
 
   // Reset timeout on new events
@@ -82,7 +124,8 @@ export function useAgentStream(streamId: string | null): UseAgentStreamReturn {
 
     eventSource.onmessage = (e) => {
       try {
-        const event: TraceEvent = JSON.parse(e.data);
+        const raw = JSON.parse(e.data);
+        const event = normalizeEvent(raw);
         
         // Skip heartbeat events - they're just keep-alive signals
         if (event.type === "heartbeat" || event.type === "connected") {
@@ -99,10 +142,6 @@ export function useAgentStream(streamId: string | null): UseAgentStreamReturn {
           eventSource.close();
           if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
-          }
-          // Try to parse report from event metadata
-          if (event.detail && typeof event.detail === "object") {
-            // Report might be in metadata
           }
         } else if (event.type === "error") {
           setStatus("error");
@@ -160,7 +199,7 @@ export function useAgentStream(streamId: string | null): UseAgentStreamReturn {
         clearTimeout(timeoutRef.current);
       }
     };
-  }, [streamId, resetTimeout]);
+  }, [streamId, connectionId, resetTimeout]);
 
-  return { events, status, error, isTimedOut, hitlCheckpoint, report, reset };
+  return { events, status, error, isTimedOut, hitlCheckpoint, report, reset, reconnect };
 }

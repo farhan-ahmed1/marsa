@@ -1,14 +1,22 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Report, Citation } from "@/lib/types";
 import { SourceList } from "./SourceCard";
+import { Metrics } from "./Metrics";
+
+interface MetricItem {
+  key: string;
+  value: string;
+  sub: string;
+}
 
 interface ReportViewProps {
   report: Report | null;
   rawReport?: string | null;
   isLoading?: boolean;
+  metrics?: MetricItem[];
 }
 
 // Inline citation button [1] [2] ...
@@ -82,7 +90,7 @@ function buildReportMarkdown(report: Report | null, rawReport?: string | null): 
   return lines.join("\n");
 }
 
-export function ReportView({ report, rawReport, isLoading }: ReportViewProps) {
+export function ReportView({ report, rawReport, isLoading, metrics }: ReportViewProps) {
   const [hoveredCitation, setHoveredCitation] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const sourcesRef = useRef<HTMLDivElement>(null);
@@ -213,6 +221,14 @@ export function ReportView({ report, rawReport, isLoading }: ReportViewProps) {
         <div className="rounded-lg border border-terminal-border bg-terminal-surface p-4 mb-8">
           <p className="text-xs font-semibold text-terminal-dim uppercase tracking-wider mb-2">Confidence Assessment</p>
           <p className="text-terminal-mid text-sm leading-relaxed font-mono">{report.confidence_summary}</p>
+        </div>
+      )}
+
+      {/* Query metrics */}
+      {metrics && metrics.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-terminal-dim uppercase tracking-wider mb-2">Query Metrics</p>
+          <Metrics show metrics={metrics} />
         </div>
       )}
 

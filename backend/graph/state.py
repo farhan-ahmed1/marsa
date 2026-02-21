@@ -530,6 +530,9 @@ class AgentState(TypedDict, total=False):
     # Timing
     started_at: str
     
+    # Cross-session memory context injected before planning
+    memory_context: str
+    
     # Parallel execution support - uses Annotated with operator.add
     # to aggregate results from parallel Send branches
     parallel_results: Annotated[list[dict], operator.add]
@@ -581,6 +584,7 @@ def create_initial_state(query: str) -> AgentState:
         errors=[],
         hitl_feedback=None,
         started_at=datetime.now(timezone.utc).isoformat(),
+        memory_context="",
         parallel_results=[],
     )
 

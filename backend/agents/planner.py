@@ -199,12 +199,14 @@ def _parse_query_plan(response_text: str) -> QueryPlan:
 async def create_query_plan(
     query: str,
     llm: Optional[ChatAnthropic] = None,
+    memory_context: str = "",
 ) -> QueryPlan:
     """Analyze a query and create a research plan.
     
     Args:
         query: The user's research query.
         llm: Optional ChatAnthropic instance (created if not provided).
+        memory_context: Optional prior research context from cross-session memory.
         
     Returns:
         QueryPlan with decomposed sub-queries and research strategy.
@@ -215,12 +217,22 @@ async def create_query_plan(
     if llm is None:
         llm = _create_llm()
     
+    # Build the user message, appending memory context if available
+    user_content = f"Create a research plan for this query:\n\n{query}"
+    if memory_context:
+        user_content += (
+            "\n\n"
+            + memory_context
+            + "\n\nNote: use the prior context only to enrich sub-queries, "
+              "not to skip current research."
+        )
+    
     messages = [
         SystemMessage(content=PLANNER_SYSTEM_PROMPT),
-        HumanMessage(content=f"Create a research plan for this query:\n\n{query}"),
+        HumanMessage(content=user_content),
     ]
     
-    logger.info("creating_query_plan", query=query[:100])
+    logger.info("creating_query_plan", query=query[:100], has_memory=bool(memory_context))
     
     response = await llm.ainvoke(messages)
     response_text = response.content
@@ -258,6 +270,7 @@ async def planner_node(state: AgentState) -> dict:
         Dict with state updates (plan, sub_queries, status).
     """
     query = state.get("query", "")
+    memory_context = state.get("memory_context", "")
     
     if not query:
         logger.warning("planner_node_empty_query")
@@ -269,7 +282,7 @@ async def planner_node(state: AgentState) -> dict:
         }
     
     try:
-        plan = await create_query_plan(query)
+        plan = await create_query_plan(query, memory_context=memory_context)
         return {
             "plan": plan,
             "sub_queries": plan.sub_queries,

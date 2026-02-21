@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { QueryInput } from "@/components/QueryInput";
 import { AgentTrace } from "@/components/AgentTrace";
 import { Pipeline } from "@/components/Pipeline";
 import { ReportView } from "@/components/ReportView";
 import { HITLFeedback } from "@/components/HITLFeedback";
+import { Timeline } from "@/components/Timeline";
+import { Metrics } from "@/components/Metrics";
 import { ToastProvider, useToast } from "@/components/Toast";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { getReport, submitFeedback } from "@/lib/api";
+import { computeQueryMetrics, metricsToItems } from "@/lib/utils";
 import type { AgentName, StreamStatus, TraceEvent, FeedbackAction, ReportResponse } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -28,7 +31,7 @@ function HomePageContent() {
   const traceRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
 
-  const { events, status, error, isTimedOut, hitlCheckpoint, reset } = useAgentStream(streamId);
+  const { events, status, error, isTimedOut, hitlCheckpoint, reset, reconnect } = useAgentStream(streamId);
 
   const fetchReport = useCallback(async (sid: string) => {
     setIsLoadingReport(true);
@@ -104,7 +107,11 @@ function HomePageContent() {
     if (status === "running" && phase === "idle") setPhase("running");
     else if (status === "complete") setPhase("complete");
     else if (status === "error") setPhase("error");
-    else if (status === "hitl") setPhase("hitl");
+    // Only transition to hitl if we are NOT already running (e.g. after
+    // submitting feedback and reconnecting).  Without this guard the
+    // stale "hitl" status from the hook would immediately revert
+    // the phase back before the reconnected stream delivers new events.
+    else if (status === "hitl" && phase !== "running" && phase !== "synth") setPhase("hitl");
   }, [status, phase]);
 
   const handleSubmit = useCallback(async (query: string) => {
@@ -150,7 +157,11 @@ function HomePageContent() {
         setPhase("idle");
         reset();
       } else {
+        // Reconnect to the SSE stream so we receive events from the
+        // resumed workflow. This resets the hook status to "running"
+        // and opens a fresh EventSource to the same stream endpoint.
         setPhase("running");
+        reconnect();
       }
     } catch (err) {
       console.error("Failed to submit feedback:", err);
@@ -158,7 +169,7 @@ function HomePageContent() {
     } finally {
       setIsSubmittingFeedback(false);
     }
-  }, [streamId, addToast, reset]);
+  }, [streamId, addToast, reset, reconnect]);
 
   const pipelineVisible = phase !== "idle";
 
@@ -227,12 +238,20 @@ function HomePageContent() {
                 streamId={streamId}
                 onFeedback={handleFeedback}
                 isSubmittingFeedback={isSubmittingFeedback}
+                reportData={reportData}
               />
             ) : (
               <ReportView
                 report={reportData?.report || null}
                 rawReport={reportData?.raw_report}
                 isLoading={isLoadingReport}
+                metrics={
+                  reportData
+                    ? metricsToItems(
+                        computeQueryMetrics(events, reportData.report ?? null, reportData.metrics)
+                      )
+                    : undefined
+                }
               />
             )}
           </div>
@@ -259,6 +278,7 @@ interface OverviewContentProps {
   streamId: string | null;
   onFeedback: (action: FeedbackAction, detail?: string) => Promise<void>;
   isSubmittingFeedback: boolean;
+  reportData?: ReportResponse | null;
 }
 
 function OverviewContent({ 
@@ -270,6 +290,7 @@ function OverviewContent({
   streamId,
   onFeedback,
   isSubmittingFeedback,
+  reportData,
 }: OverviewContentProps) {
   // --- Idle ---
   if (phase === "idle") {
@@ -364,17 +385,50 @@ function OverviewContent({
 
   // --- Complete ---
   if (phase === "complete") {
-    const agentStats = [
-      { name: "Planner", time: "1.4s", tokens: 560, color: "bg-blue-400", pct: 10 },
-      { name: "Researcher", time: "5.8s", tokens: 1847, color: "bg-emerald-400", pct: 42 },
-      { name: "Fact Checker", time: "3.2s", tokens: 2348, color: "bg-amber-400", pct: 23 },
-      { name: "Synthesizer", time: "3.8s", tokens: 3653, color: "bg-violet-400", pct: 27 },
-    ];
+    // Compute real agent stats from events
+    const AGENT_ORDER_MAP: Record<string, { name: string; color: string; barColor: string }> = {
+      planner:      { name: "Planner",      color: "text-blue-400",   barColor: "bg-blue-400" },
+      researcher:   { name: "Researcher",   color: "text-emerald-400", barColor: "bg-emerald-400" },
+      fact_checker: { name: "Fact Checker", color: "text-amber-400",  barColor: "bg-amber-400" },
+      synthesizer:  { name: "Synthesizer",  color: "text-violet-400", barColor: "bg-violet-400" },
+    };
+
+    // Compute per-agent stats from real trace events
+    const byAgent: Record<string, TraceEvent[]> = {};
+    for (const e of events) {
+      if (!byAgent[e.agent]) byAgent[e.agent] = [];
+      byAgent[e.agent].push(e);
+    }
+
+    const firstTs = events.length > 0 ? new Date(events[0].timestamp).getTime() : 0;
+    const lastEv = events[events.length - 1];
+    const totalElapsedMs = events.length > 0
+      ? new Date(lastEv.timestamp).getTime() - firstTs + (lastEv.latency_ms ?? 0)
+      : 0;
+
+    const agentStats = (["planner", "researcher", "fact_checker", "synthesizer"] as const)
+      .filter((agent) => byAgent[agent])
+      .map((agent) => {
+        const evs = byAgent[agent];
+        const spanMs =
+          new Date(evs[evs.length - 1].timestamp).getTime() -
+          new Date(evs[0].timestamp).getTime() +
+          (evs[evs.length - 1].latency_ms ?? 300);
+        const tokens = evs.reduce((a, e) => a + (e.tokens_used ?? 0), 0);
+        const pct = totalElapsedMs > 0 ? Math.round((spanMs / totalElapsedMs) * 100) : 0;
+        const { name, color, barColor } = AGENT_ORDER_MAP[agent];
+        const time = spanMs < 1000 ? `${Math.round(spanMs)}ms` : `${(spanMs / 1000).toFixed(1)}s`;
+        return { name, time, tokens, color, barColor, pct: Math.max(pct, 4) };
+      });
+
+    // Compute real metrics
+    const queryMetrics = computeQueryMetrics(events, reportData?.report ?? null, reportData?.metrics);
+    const metricItems = metricsToItems(queryMetrics);
 
     return (
-      <div className="p-6 animate-fade-in">
+      <div className="p-6 animate-fade-in space-y-6">
         {/* Success banner */}
-        <div className="flex items-center gap-3 p-4 rounded-lg bg-semantic-passSubtle border border-semantic-passBorder mb-6">
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-semantic-passSubtle border border-semantic-passBorder">
           <div className="w-8 h-8 rounded-full bg-semantic-passSubtle border border-semantic-passBorder flex items-center justify-center flex-shrink-0">
             <svg className="w-4 h-4 text-semantic-pass" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -386,26 +440,38 @@ function OverviewContent({
           </div>
         </div>
 
-        {/* Execution breakdown */}
-        <h3 className="text-sm font-semibold text-terminal-white mb-4">Execution Breakdown</h3>
-        <div className="space-y-4">
-          {agentStats.map((item, i) => (
-            <div key={i} className="animate-slide-in" style={{ animationDelay: `${i * 0.06}s` }}>
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-sm text-terminal-white">{item.name}</span>
-                <div className="flex items-center gap-3 text-xs text-terminal-dim font-mono">
-                  <span>{item.time}</span>
-                  <span>{item.tokens.toLocaleString()} tok</span>
+        {/* Query metrics strip */}
+        <Metrics show metrics={metricItems} />
+
+        {/* Gantt timeline */}
+        <div>
+          <h3 className="text-sm font-semibold text-terminal-white mb-3">Execution Timeline</h3>
+          <Timeline events={events} />
+        </div>
+
+        {/* Per-agent execution breakdown */}
+        <div>
+          <h3 className="text-sm font-semibold text-terminal-white mb-3">Agent Breakdown</h3>
+          <div className="space-y-3.5">
+            {agentStats.map((item, i) => (
+              <div key={i} className="animate-slide-in" style={{ animationDelay: `${i * 0.06}s` }}>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className={`text-sm font-medium ${item.color}`}>{item.name}</span>
+                  <div className="flex items-center gap-3 text-xs text-terminal-dim font-mono">
+                    <span>{item.time}</span>
+                    <span>{item.tokens.toLocaleString()} tok</span>
+                    <span className="text-terminal-dim/60">{item.pct}%</span>
+                  </div>
+                </div>
+                <div className="h-1.5 rounded-full bg-terminal-surface overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${item.barColor} transition-all duration-700`}
+                    style={{ width: `${item.pct}%` }}
+                  />
                 </div>
               </div>
-              <div className="h-1.5 rounded-full bg-terminal-surface overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${item.color} transition-all duration-700`}
-                  style={{ width: `${item.pct}%` }}
-                />
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     );

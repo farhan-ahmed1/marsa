@@ -4,6 +4,7 @@ This module configures and creates the FastAPI application with
 CORS middleware, routes, and startup/shutdown handlers.
 """
 
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -16,6 +17,30 @@ from .routes import router
 logger = structlog.get_logger(__name__)
 
 
+def _configure_langsmith() -> None:
+    """Set LangSmith / LangChain tracing environment variables from config.
+
+    LangChain checks os.environ at import time for these variables, so they
+    must be set before any ChatAnthropic / chain objects are created.
+    If LANGCHAIN_TRACING_V2 is already set in the environment (e.g. from a
+    .env file loaded by dotenv) this is a no-op for that key.
+    """
+    try:
+        from config import config  # local import to avoid circular at module level
+        if config.langchain_tracing and config.langchain_api_key:
+            os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+            os.environ.setdefault("LANGCHAIN_API_KEY", config.langchain_api_key)
+            os.environ.setdefault("LANGCHAIN_PROJECT", config.langchain_project or "marsa")
+            logger.info(
+                "langsmith_tracing_enabled",
+                project=config.langchain_project,
+            )
+        else:
+            logger.info("langsmith_tracing_disabled")
+    except Exception as exc:
+        logger.warning("langsmith_configure_failed", error=str(exc))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown.
@@ -24,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # Startup
     logger.info("api_starting", version="1.0.0")
+    _configure_langsmith()
     
     yield
     

@@ -29,6 +29,7 @@ from agents.researcher import (
 from agents.synthesizer import synthesize_node
 from graph.checkpointer import create_checkpointer
 from graph.state import AgentName, AgentState, PipelineStatus, TraceEvent
+from memory.cross_session import get_relevant_memories, store_session
 
 logger = structlog.get_logger(__name__)
 
@@ -48,6 +49,9 @@ def _add_planner_trace(state: AgentState) -> AgentState:
 async def planner_with_trace(state: AgentState) -> dict:
     """Planner node wrapper that adds trace events.
     
+    Retrieves cross-session memories before planning so the planner
+    can reference prior verified findings for related topics.
+    
     Args:
         state: Current agent state.
         
@@ -55,20 +59,39 @@ async def planner_with_trace(state: AgentState) -> dict:
         Updated state with plan and trace events.
     """
     agent_trace = state.get("agent_trace", []).copy()
+    query = state.get("query", "")
+    
+    # --- Cross-session memory retrieval ---
+    try:
+        memory_context = get_relevant_memories(query)
+    except Exception as exc:
+        logger.warning("memory_retrieval_failed", error=str(exc))
+        memory_context = ""
     
     # Add starting trace
     agent_trace.append(TraceEvent(
         agent=AgentName.PLANNER,
         action="start",
-        detail=f"Planning research for: {state.get('query', '')[:50]}...",
-        metadata={"query": state.get("query", "")},
+        detail=f"Planning research for: {query[:50]}...",
+        metadata={"query": query, "has_memory_context": bool(memory_context)},
     ))
     
-    # Execute planner
-    result = await planner_node({**state, "agent_trace": agent_trace})
+    if memory_context:
+        agent_trace.append(TraceEvent(
+            agent=AgentName.PLANNER,
+            action="memory_retrieved",
+            detail="Retrieved relevant prior research context",
+            metadata={"memory_chars": len(memory_context)},
+        ))
+    
+    # Execute planner (inject memory context into state)
+    result = await planner_node(
+        {**state, "agent_trace": agent_trace, "memory_context": memory_context}
+    )
     
     # Clear hitl_feedback after consuming it (prevents stale feedback in next HITL round)
     result["hitl_feedback"] = None
+    result["memory_context"] = memory_context
     
     # Add completion trace
     plan = result.get("plan")
@@ -146,6 +169,32 @@ async def synthesizer_with_status(state: AgentState) -> dict:
     # Clear hitl_feedback after consuming it
     result["hitl_feedback"] = None
     return result
+
+
+async def store_memory_node(state: AgentState) -> dict:
+    """Store the completed research session to cross-session memory.
+    
+    Runs after the Synthesizer and persists key topics, verified claims,
+    and source quality data to ChromaDB for future session retrieval.
+    
+    Args:
+        state: Final AgentState from synthesis.
+        
+    Returns:
+        Unchanged state (fire-and-forget side effect).
+    """
+    try:
+        store_session(state)
+        agent_trace = state.get("agent_trace", []).copy()
+        agent_trace.append(TraceEvent(
+            agent=AgentName.SYNTHESIZER,
+            action="memory_stored",
+            detail="Research session saved to long-term memory",
+        ))
+        return {**state, "agent_trace": agent_trace}
+    except Exception as exc:
+        logger.error("store_memory_node_failed", error=str(exc))
+        return state  # Don't fail the workflow on memory errors
 
 
 async def hitl_checkpoint_node(state: AgentState) -> dict:
@@ -316,6 +365,7 @@ def create_workflow(
     workflow.add_node("planner", planner_with_trace)
     workflow.add_node("fact_checker", fact_checker_with_status)
     workflow.add_node("synthesizer", synthesizer_with_status)
+    workflow.add_node("store_memory", store_memory_node)
     
     # Add HITL checkpoint node if enabled
     if enable_hitl:
@@ -376,8 +426,9 @@ def create_workflow(
             },
         )
     
-    # Synthesizer goes to END
-    workflow.add_edge("synthesizer", END)
+    # Synthesizer -> store memory -> END
+    workflow.add_edge("synthesizer", "store_memory")
+    workflow.add_edge("store_memory", END)
     
     # Get checkpointer - use shared singleton for memory mode (CRITICAL for HITL)
     if use_memory_checkpointer:
@@ -394,11 +445,12 @@ def create_workflow(
     compile_kwargs = {"checkpointer": checkpointer}
     
     if enable_hitl:
-        # Pause BEFORE hitl_checkpoint for human review.
-        # This ensures the routing decision (which reads hitl_feedback)
-        # happens AFTER the user provides feedback via update_state.
-        compile_kwargs["interrupt_before"] = ["hitl_checkpoint"]
-        logger.info("hitl_enabled", interrupt_before="hitl_checkpoint")
+        # Pause AFTER fact_checker for human review.
+        # This ensures we stop exactly when verification is done, before
+        # proceeding to the HITL checkpoint node.
+        # Note: We use interrupt_after instead of interrupt_before to be explicit.
+        compile_kwargs["interrupt_after"] = ["fact_checker"]
+        logger.info("hitl_enabled", interrupt_after="fact_checker")
     
     app = workflow.compile(**compile_kwargs)
     

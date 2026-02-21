@@ -403,11 +403,20 @@ async def run_workflow_with_streaming(
         use_memory_checkpointer=True,
     )
     
-    # Config for checkpointing
+    # Config for checkpointing + LangSmith metadata
     config = {
         "configurable": {
             "thread_id": stream_id,
-        }
+        },
+        # LangSmith tracing metadata — automatically captured when tracing is enabled
+        "run_name": f"MARSA: {query[:60]}",
+        "tags": ["marsa", "research"],
+        "metadata": {
+            "query": query[:200],
+            "stream_id": stream_id,
+            "enable_hitl": enable_hitl,
+            "enable_parallel": enable_parallel,
+        },
     }
     
     logger.info(
@@ -538,12 +547,49 @@ async def run_workflow_with_streaming(
             "synthesizing",
         ):
             # Build metrics for the complete event
+            agent_trace_items = final_state.get("agent_trace", [])
+            total_tokens = sum(
+                getattr(e, "tokens_used", 0) or 0 for e in agent_trace_items
+            )
+            
+            # Compute total latency from trace timestamps
+            total_latency_ms: float = 0.0
+            if agent_trace_items:
+                try:
+                    from datetime import datetime as _dt
+                    _ts0 = str(
+                        agent_trace_items[0].timestamp
+                        if hasattr(agent_trace_items[0], "timestamp")
+                        else agent_trace_items[0].get("timestamp", "")
+                    )
+                    _last_ev = agent_trace_items[-1]
+                    _ts1 = str(
+                        _last_ev.timestamp if hasattr(_last_ev, "timestamp")
+                        else _last_ev.get("timestamp", "")
+                    )
+                    _last_lat = (
+                        _last_ev.latency_ms if hasattr(_last_ev, "latency_ms")
+                        else _last_ev.get("latency_ms", 0)
+                    ) or 0
+                    total_latency_ms = (
+                        (_dt.fromisoformat(_ts1) - _dt.fromisoformat(_ts0)).total_seconds() * 1000
+                        + _last_lat
+                    )
+                except Exception:
+                    pass
+            
+            plan = final_state.get("plan")
             metrics = {
                 "claims_count": len(final_state.get("claims", [])),
                 "verification_count": len(final_state.get("verification_results", [])),
                 "citations_count": len(final_state.get("citations", [])),
-                "trace_events_count": len(final_state.get("agent_trace", [])),
+                "trace_events_count": len(agent_trace_items),
                 "iteration_count": final_state.get("iteration_count", 0),
+                "total_tokens": total_tokens,
+                "total_latency_ms": round(total_latency_ms),
+                "query_type": plan.query_type.value if plan else "unknown",
+                "estimated_complexity": plan.estimated_complexity.value if plan else "unknown",
+                "sub_query_count": len(plan.sub_queries) if plan else 0,
             }
             
             # Calculate fact-check pass rate
@@ -623,10 +669,14 @@ async def resume_workflow_with_streaming(
     config = {
         "configurable": {
             "thread_id": stream_id,
-        }
+        },
+        "run_name": f"MARSA resume: {stream_id[:12]}",
+        "tags": ["marsa", "research", "resume"],
+        "metadata": {
+            "stream_id": stream_id,
+            "feedback_action": feedback.get("action", "approve"),
+        },
     }
-    
-    # Create feedback object
     hitl_feedback = HITLFeedback(
         action=feedback.get("action", "approve"),
         topic=feedback.get("topic"),
@@ -695,8 +745,18 @@ async def resume_workflow_with_streaming(
                         await event_queue_manager.push_event(stream_id, sse_event)
                     
                     last_trace_count = len(trace_events)
-                    await event_queue_manager.update_state(stream_id, output)
-                    final_state = output
+                    
+                    # Only update stored state when the output looks like a
+                    # full AgentState (has the query field).  Intermediate
+                    # node outputs (e.g. hitl_checkpoint returning just
+                    # {"status": "awaiting_feedback"}) are partial and would
+                    # overwrite the complete state we need for the report.
+                    if output.get("query"):
+                        await event_queue_manager.update_state(stream_id, output)
+                        final_state = output
+                    elif final_state is None:
+                        # First output - keep as fallback
+                        final_state = output
     
     except Exception as e:
         logger.error("workflow_resume_error", stream_id=stream_id, error=str(e))

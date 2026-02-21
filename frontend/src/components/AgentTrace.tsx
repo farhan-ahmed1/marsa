@@ -71,7 +71,7 @@ function TraceRow({ event, isLast, isActive }: { event: TraceEvent; isLast: bool
           {event.latency_ms !== undefined && (
             <span>{event.latency_ms < 1000 ? `${event.latency_ms}ms` : `${(event.latency_ms / 1000).toFixed(2)}s`}</span>
           )}
-          {event.tokens_used !== undefined && (
+          {event.tokens_used != null && (
             <span>{event.tokens_used.toLocaleString()} tok</span>
           )}
         </div>
