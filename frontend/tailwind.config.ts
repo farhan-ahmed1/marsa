@@ -14,17 +14,18 @@ const config: Config = {
 				sans: ["Inter", "IBM Plex Sans", "-apple-system", "sans-serif"],
 			},
 			colors: {
-				// Dark navy-tinted background palette
+				// Dark navy-tinted background palette — values come from CSS custom properties
+				// so the light/dark toggle works by redefining the RGB channel vars.
 				terminal: {
-					black: "#0F1117",
-					surface: "#161B27",
-					surfaceHover: "#1E2537",
-					border: "#2D3748",
-					borderDotted: "#374151",
-					white: "#E2E8F0",
-					mid: "#94A3B8",
-					dim: "#64748B",
-					pure: "#F8FAFC",
+					black:        "rgb(var(--terminal-black) / <alpha-value>)",
+					surface:      "rgb(var(--terminal-surface) / <alpha-value>)",
+					surfaceHover: "rgb(var(--terminal-surface-hover) / <alpha-value>)",
+					border:       "rgb(var(--terminal-border) / <alpha-value>)",
+					borderDotted: "rgb(var(--terminal-border-dotted) / <alpha-value>)",
+					white:        "rgb(var(--terminal-white) / <alpha-value>)",
+					mid:          "rgb(var(--terminal-mid) / <alpha-value>)",
+					dim:          "rgb(var(--terminal-dim) / <alpha-value>)",
+					pure:         "rgb(var(--terminal-pure) / <alpha-value>)",
 				},
 				// Agent colors — each agent has a distinct hue
 				agent: {

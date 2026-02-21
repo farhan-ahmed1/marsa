@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { QueryInput } from "@/components/QueryInput";
 import { AgentTrace } from "@/components/AgentTrace";
 import { Pipeline } from "@/components/Pipeline";
@@ -9,7 +9,10 @@ import { HITLFeedback } from "@/components/HITLFeedback";
 import { Timeline } from "@/components/Timeline";
 import { Metrics } from "@/components/Metrics";
 import { ToastProvider, useToast } from "@/components/Toast";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { QueryHistory } from "@/components/QueryHistory";
 import { useAgentStream } from "@/hooks/useAgentStream";
+import { useQueryHistory } from "@/hooks/useQueryHistory";
 import { getReport, submitFeedback } from "@/lib/api";
 import { computeQueryMetrics, metricsToItems } from "@/lib/utils";
 import type { AgentName, StreamStatus, TraceEvent, FeedbackAction, ReportResponse } from "@/lib/types";
@@ -28,8 +31,10 @@ function HomePageContent() {
   const [reportData, setReportData] = useState<ReportResponse | null>(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [leftTab, setLeftTab] = useState<"trace" | "history">("trace");
   const traceRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
+  const { history, addEntry, removeEntry, clearHistory } = useQueryHistory();
 
   const { events, status, error, isTimedOut, hitlCheckpoint, reset, reconnect } = useAgentStream(streamId);
 
@@ -122,6 +127,8 @@ function HomePageContent() {
     setShowReport(false);
     setCurrentAgent(null);
     setReportData(null);
+    setLeftTab("trace");
+    addEntry(query);
     try {
       const response = await fetch(`${API_BASE}/api/query`, {
         method: "POST",
@@ -136,7 +143,7 @@ function HomePageContent() {
       setPhase("error");
       addToast("Failed to submit query. Please check your connection.", "error");
     }
-  }, [reset, addToast]);
+  }, [reset, addToast, addEntry]);
 
   const handleFeedback = useCallback(async (action: FeedbackAction, detail?: string) => {
     if (!streamId) return;
@@ -176,11 +183,25 @@ function HomePageContent() {
   return (
     <div className="min-h-screen bg-terminal-black text-terminal-white">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 h-14 border-b border-terminal-border bg-terminal-black sticky top-0 z-50">
+      <header className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-terminal-border bg-terminal-black sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <div className="w-7 h-7 bg-accent rounded-md flex items-center justify-center text-white text-sm font-bold">M</div>
+          <div className="w-7 h-7 bg-accent rounded-md flex items-center justify-center text-white text-sm font-bold flex-shrink-0">M</div>
           <span className="text-base font-semibold text-terminal-pure tracking-tight">MARSA</span>
-          <span className="text-xs text-terminal-dim bg-terminal-surface px-2 py-0.5 rounded border border-terminal-border">v1.0</span>
+          <span className="hidden sm:inline text-xs text-terminal-dim bg-terminal-surface px-2 py-0.5 rounded border border-terminal-border">v1.0</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://github.com/farhan/marsa"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View on GitHub"
+            className="flex items-center justify-center w-8 h-8 rounded-md text-terminal-dim hover:text-terminal-white hover:bg-terminal-surface transition-colors"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z" />
+            </svg>
+          </a>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -188,12 +209,57 @@ function HomePageContent() {
       <Pipeline currentAgent={currentAgent} status={phase} />
 
       {/* Main content */}
-      <div className="flex" style={{ height: `calc(100vh - ${pipelineVisible ? 112 : 56}px)` }}>
-        {/* Left panel: Query + Trace */}
-        <div className="w-[400px] flex-shrink-0 border-r border-terminal-border flex flex-col bg-terminal-surface/30">
+      <div
+        className="flex flex-col md:flex-row"
+        style={{ minHeight: `calc(100vh - ${pipelineVisible ? 112 : 56}px)` }}
+      >
+        {/* Left panel: Query + Trace / History */}
+        <div
+          className="w-full md:w-[400px] md:flex-shrink-0 border-b md:border-b-0 md:border-r border-terminal-border flex flex-col bg-terminal-surface/30"
+          style={{ height: "100%" }}
+        >
           <QueryInput onSubmit={handleSubmit} status={phase} />
+
+          {/* Panel sub-tabs: Trace | History */}
+          <div className="flex border-b border-terminal-border flex-shrink-0">
+            <button
+              onClick={() => setLeftTab("trace")}
+              className={`flex-1 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+                leftTab === "trace"
+                  ? "text-terminal-pure border-accent"
+                  : "text-terminal-dim border-transparent hover:text-terminal-white"
+              }`}
+            >
+              Trace
+            </button>
+            <button
+              onClick={() => setLeftTab("history")}
+              className={`flex-1 py-2 text-xs font-medium transition-colors border-b-2 -mb-px flex items-center justify-center gap-1.5 ${
+                leftTab === "history"
+                  ? "text-terminal-pure border-accent"
+                  : "text-terminal-dim border-transparent hover:text-terminal-white"
+              }`}
+            >
+              History
+              {history.length > 0 && (
+                <span className="text-[10px] bg-terminal-border text-terminal-mid px-1 rounded-full">
+                  {history.length}
+                </span>
+              )}
+            </button>
+          </div>
+
           <div ref={traceRef} className="flex-1 overflow-y-auto">
-            <AgentTrace events={events} status={phase} />
+            {leftTab === "history" ? (
+              <QueryHistory
+                entries={history}
+                onSelect={handleSubmit}
+                onRemove={removeEntry}
+                onClear={clearHistory}
+              />
+            ) : (
+              <AgentTrace events={events} status={phase} />
+            )}
           </div>
         </div>
 

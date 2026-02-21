@@ -155,14 +155,20 @@ export function ReportView({ report, rawReport, isLoading, metrics }: ReportView
 
       {/* Title */}
       {report?.title && (
-        <h1 className="text-2xl font-bold text-terminal-pure leading-tight mb-4 tracking-tight">
+        <h1
+          className="text-2xl font-bold text-terminal-pure leading-tight mb-4 tracking-tight animate-fade-in"
+          style={{ animationDelay: "0.05s", animationFillMode: "both" }}
+        >
           {report.title}
         </h1>
       )}
 
       {/* Executive summary */}
       {report?.summary && (
-        <div className="border-l-4 border-accent/50 pl-4 mb-8">
+        <div
+          className="border-l-4 border-accent/50 pl-4 mb-8 animate-fade-in"
+          style={{ animationDelay: "0.1s", animationFillMode: "both" }}
+        >
           <p className="text-terminal-mid text-base leading-relaxed">
             {processCitations(report.summary, handleCitationHover, handleCitationLeave, handleCitationClick)}
           </p>
@@ -173,7 +179,11 @@ export function ReportView({ report, rawReport, isLoading, metrics }: ReportView
       {report?.sections && report.sections.length > 0 ? (
         <div className="space-y-7 mb-10">
           {report.sections.map((section, i) => (
-            <section key={i}>
+            <section
+              key={i}
+              className="animate-fade-in"
+              style={{ animationDelay: `${0.15 + i * 0.08}s`, animationFillMode: "both" }}
+            >
               <h2 className="text-lg font-semibold text-terminal-white mb-3 pb-2 border-b border-terminal-border">
                 {section.heading}
               </h2>

@@ -12,10 +12,16 @@ export default function RootLayout({
 	children: React.ReactNode;
 }) {
 	return (
-		<html lang="en" className="dark">
+		<html lang="en">
 			<head>
 				<link rel="preconnect" href="https://fonts.googleapis.com" />
 				<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+				{/* FOUC-prevention: apply saved theme before first paint */}
+				<script
+					dangerouslySetInnerHTML={{
+						__html: `(function(){try{var t=localStorage.getItem('marsa-theme');if(t==='light'){document.documentElement.classList.add('light');}else{document.documentElement.classList.add('dark');}}catch(e){}})();`,
+					}}
+				/>
 			</head>
 			<body className="min-h-screen bg-terminal-black text-terminal-white font-mono">
 				{children}

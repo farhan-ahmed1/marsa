@@ -4,6 +4,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Terminal color tokens (dark default) ───────────────────────── */
+:root {
+  --terminal-black:        15 17 23;     /* #0F1117 */
+  --terminal-surface:      22 27 39;     /* #161B27 */
+  --terminal-surface-hover: 30 37 55;   /* #1E2537 */
+  --terminal-border:       45 55 72;    /* #2D3748 */
+  --terminal-border-dotted: 55 65 81;   /* #374151 */
+  --terminal-white:        226 232 240; /* #E2E8F0 */
+  --terminal-mid:          148 163 184; /* #94A3B8 */
+  --terminal-dim:          100 116 139; /* #64748B */
+  --terminal-pure:         248 250 252; /* #F8FAFC */
+}
+
+/* ── Light theme overrides ──────────────────────────────────────── */
+html.light {
+  --terminal-black:        248 250 252; /* #F8FAFC */
+  --terminal-surface:      241 245 249; /* #F1F5F9 */
+  --terminal-surface-hover: 226 232 240; /* #E2E8F0 */
+  --terminal-border:       203 213 225; /* #CBD5E1 */
+  --terminal-border-dotted: 148 163 184; /* #94A3B8 */
+  --terminal-white:        30 41 59;   /* #1E293B */
+  --terminal-mid:          71 85 105;  /* #475569 */
+  --terminal-dim:          148 163 184; /* #94A3B8 */
+  --terminal-pure:         15 23 42;   /* #0F172A */
+}
+
 @layer base {
   :root {
     --background: 222 20% 7%;
@@ -39,6 +65,7 @@
   body {
     @apply bg-terminal-black text-terminal-white antialiased;
     font-family: 'Inter', -apple-system, sans-serif;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
   ::selection {
     background: rgba(59, 130, 246, 0.3);
