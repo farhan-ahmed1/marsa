@@ -47,57 +47,57 @@ export function QueryInput({ onSubmit, status }: QueryInputProps) {
   };
 
   return (
-    <div className="p-4 border-b border-dashed border-terminal-borderDotted">
-      <div className="font-mono text-[0.62rem] text-terminal-dim uppercase tracking-wider mb-2.5">
-        {"// query_input"}
-      </div>
+    <div className="p-4 border-b border-terminal-border flex-shrink-0">
       <form onSubmit={handleSubmit}>
-        <div className="border border-dashed border-terminal-borderDotted rounded-sm p-2.5 mb-2.5 transition-all duration-200 focus-within:border-terminal-mid">
+        {/* Textarea with focus ring */}
+        <div className="relative rounded-lg border border-terminal-border bg-terminal-surface focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/20 transition-all">
           <textarea
             ref={textareaRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="enter your research query..."
+            placeholder="Ask a research question..."
             disabled={isLoading}
             rows={3}
-            className="w-full bg-transparent text-terminal-white placeholder:text-terminal-dim resize-none outline-none font-mono text-[0.78rem] leading-relaxed disabled:opacity-50 scrollbar-terminal"
+            className="w-full bg-transparent text-terminal-white placeholder:text-terminal-dim resize-none outline-none text-sm leading-relaxed disabled:opacity-50 px-3.5 py-3 font-mono"
           />
-        </div>
-        <div className="flex items-center justify-between">
-          <button
-            type="submit"
-            disabled={!query.trim() || isLoading}
-            className="px-3.5 py-1.5 border border-dashed border-terminal-borderDotted rounded-sm bg-transparent text-terminal-white text-[0.72rem] font-mono cursor-pointer transition-all duration-200 hover:border-terminal-mid hover:bg-white/[0.02] disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            {isLoading ? (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-terminal-white animate-pulse" />
-                <span>running</span>
-              </>
-            ) : (
-              <>
-                <span>run</span>
-                <span className="text-terminal-dim">-&gt;</span>
-              </>
-            )}
-          </button>
-          <span className="text-terminal-dim text-[0.6rem] font-mono">
-            shift+enter for newline
-          </span>
+          {/* Submit button inside textarea */}
+          <div className="flex items-center justify-between px-3 pb-2.5">
+            <span className="text-xs text-terminal-dim">⏎ to submit · Shift+⏎ for newline</span>
+            <button
+              type="submit"
+              disabled={!query.trim() || isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent text-white text-sm font-medium transition-all hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {isLoading ? (
+                <>
+                  <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  <span>Running</span>
+                </>
+              ) : (
+                <>
+                  <span>Research</span>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </form>
-      <div className="mt-4">
-        <div className="font-mono text-[0.58rem] text-terminal-dim mb-2">{"// examples"}</div>
-        <div className="flex flex-wrap gap-1.5">
+
+      {/* Example queries */}
+      <div className="mt-3">
+        <p className="text-xs text-terminal-dim mb-2">Try an example:</p>
+        <div className="flex flex-col gap-1.5">
           {EXAMPLE_QUERIES.map((example, i) => (
             <button
               key={i}
               onClick={() => handleExampleClick(example)}
               disabled={isLoading}
-              className="px-2 py-1 border border-dashed border-terminal-borderDotted rounded-sm bg-transparent text-terminal-dim text-[0.66rem] font-mono cursor-pointer transition-all duration-200 hover:border-terminal-mid hover:text-terminal-white disabled:opacity-40 disabled:cursor-not-allowed"
+              className="text-left px-3 py-2 rounded-md border border-terminal-border bg-transparent text-sm text-terminal-mid transition-all hover:border-terminal-mid hover:text-terminal-white hover:bg-terminal-surface disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <span className="text-terminal-mid mr-1">$</span>
               {example}
             </button>
           ))}

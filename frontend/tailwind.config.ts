@@ -11,26 +11,48 @@ const config: Config = {
 		extend: {
 			fontFamily: {
 				mono: ["IBM Plex Mono", "JetBrains Mono", "Fira Code", "monospace"],
-				sans: ["IBM Plex Sans", "-apple-system", "sans-serif"],
+				sans: ["Inter", "IBM Plex Sans", "-apple-system", "sans-serif"],
 			},
 			colors: {
-				// Monochrome palette (matching prototype DS)
+				// Dark navy-tinted background palette
 				terminal: {
-					black: "#0C0C0C",
-					surface: "#141414",
-					surfaceHover: "#1A1A1A",
-					border: "#282828",
-					borderDotted: "#333333",
-					white: "#E0E0E0",
-					mid: "#999999",
-					dim: "#5A5A5A",
-					pure: "#FFFFFF",
+					black: "#0F1117",
+					surface: "#161B27",
+					surfaceHover: "#1E2537",
+					border: "#2D3748",
+					borderDotted: "#374151",
+					white: "#E2E8F0",
+					mid: "#94A3B8",
+					dim: "#64748B",
+					pure: "#F8FAFC",
 				},
-				// Semantic colors
+				// Agent colors — each agent has a distinct hue
+				agent: {
+					planner: "#60A5FA",      // blue-400
+					researcher: "#34D399",    // emerald-400
+					fact_checker: "#FBBF24",  // amber-400
+					synthesizer: "#A78BFA",   // violet-400
+					system: "#94A3B8",        // slate-400
+				},
+				// Blue primary accent
+				accent: {
+					DEFAULT: "#3B82F6",
+					hover: "#2563EB",
+					subtle: "rgba(59,130,246,0.12)",
+					subtleBorder: "rgba(59,130,246,0.3)",
+					foreground: "hsl(var(--accent-foreground))",
+				},
+				// Semantic colors with proper vibrancy
 				semantic: {
-					pass: "#5AE05A",
-					unknown: "#D4C55A",
-					fail: "#D45A5A",
+					pass: "#22C55E",
+					passSubtle: "rgba(34,197,94,0.12)",
+					passBorder: "rgba(34,197,94,0.3)",
+					unknown: "#F59E0B",
+					unknownSubtle: "rgba(245,158,11,0.12)",
+					unknownBorder: "rgba(245,158,11,0.3)",
+					fail: "#EF4444",
+					failSubtle: "rgba(239,68,68,0.12)",
+					failBorder: "rgba(239,68,68,0.3)",
 				},
 				// Shadcn variables
 				background: "hsl(var(--background))",
@@ -55,10 +77,7 @@ const config: Config = {
 					DEFAULT: "hsl(var(--muted))",
 					foreground: "hsl(var(--muted-foreground))",
 				},
-				accent: {
-					DEFAULT: "hsl(var(--accent))",
-					foreground: "hsl(var(--accent-foreground))",
-				},
+
 				destructive: {
 					DEFAULT: "hsl(var(--destructive))",
 					foreground: "hsl(var(--destructive-foreground))",
@@ -68,9 +87,10 @@ const config: Config = {
 				ring: "hsl(var(--ring))",
 			},
 			borderRadius: {
-				sm: "3px",
+				sm: "4px",
 				md: "6px",
-				lg: "8px",
+				lg: "10px",
+				xl: "14px",
 			},
 			animation: {
 				"blink": "blink 1s step-end infinite",

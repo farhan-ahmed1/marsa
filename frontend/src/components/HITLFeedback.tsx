@@ -12,81 +12,64 @@ interface HITLFeedbackProps {
   isSubmitting?: boolean;
 }
 
-// Get verdict styling
-function getVerdictStyle(verdict: "supported" | "contradicted" | "unverifiable"): {
-  icon: string;
-  className: string;
-  label: string;
-} {
-  switch (verdict) {
-    case "supported":
-      return { icon: "OK", className: "text-semantic-pass border-semantic-pass/40", label: "supported" };
-    case "contradicted":
-      return { icon: "!!", className: "text-semantic-fail border-semantic-fail/40", label: "contradicted" };
-    case "unverifiable":
-      return { icon: "??", className: "text-semantic-unknown border-semantic-unknown/40", label: "unverifiable" };
-  }
+function VerdictBadge({ verdict }: { verdict: "supported" | "contradicted" | "unverifiable" }) {
+  const cfg = {
+    supported: { label: "supported", cls: "text-semantic-pass bg-semantic-passSubtle border-semantic-passBorder" },
+    contradicted: { label: "contradicted", cls: "text-semantic-fail bg-semantic-failSubtle border-semantic-failBorder" },
+    unverifiable: { label: "unverifiable", cls: "text-semantic-unknown bg-semantic-unknownSubtle border-semantic-unknownBorder" },
+  }[verdict];
+  return (
+    <span className={`px-2 py-0.5 border rounded-full text-xs font-medium ${cfg.cls}`}>
+      {cfg.label}
+    </span>
+  );
 }
 
-// Claim card component
 function ClaimCard({ claim }: { claim: VerificationResult }) {
-  const verdictStyle = getVerdictStyle(claim.verdict);
   const [expanded, setExpanded] = useState(false);
+  const conf = claim.confidence;
+  const confColor = conf >= 0.7 ? "text-semantic-pass" : conf >= 0.5 ? "text-semantic-unknown" : "text-semantic-fail";
 
   return (
-    <div className="border border-dashed border-terminal-borderDotted rounded-sm p-3 bg-terminal-surface/30 animate-slide-in">
+    <div className="border border-terminal-border rounded-lg p-3.5 bg-terminal-surface hover:bg-terminal-surfaceHover transition-colors">
       <div className="flex items-start justify-between gap-3 mb-2">
-        <p className="font-mono text-[0.74rem] text-terminal-white leading-relaxed flex-1">
+        <p className="text-sm text-terminal-white leading-relaxed flex-1">
           {claim.claim.statement}
         </p>
-        <span
-          className={`px-1.5 py-0.5 border rounded-sm text-[0.6rem] font-mono flex-shrink-0 ${verdictStyle.className}`}
-        >
-          {verdictStyle.icon} {verdictStyle.label}
-        </span>
+        <VerdictBadge verdict={claim.verdict} />
       </div>
-      <div className="flex items-center gap-3 text-[0.64rem] font-mono">
-        <span className="text-terminal-dim">
-          confidence: <span className={claim.confidence >= 0.7 ? "text-semantic-pass" : claim.confidence >= 0.5 ? "text-semantic-unknown" : "text-semantic-fail"}>
-            {Math.round(claim.confidence * 100)}%
-          </span>
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-xs text-terminal-dim">
+          confidence: <span className={`${confColor} font-medium`}>{Math.round(conf * 100)}%</span>
         </span>
-        <span className="text-terminal-dim">|</span>
-        <span className="text-terminal-dim">{claim.claim.category}</span>
+        <span className="text-terminal-borderDotted">·</span>
+        <span className="text-xs text-terminal-dim">{claim.claim.category}</span>
         {claim.reasoning && (
           <>
-            <span className="text-terminal-dim">|</span>
+            <span className="text-terminal-borderDotted">·</span>
             <button
               type="button"
               onClick={() => setExpanded(!expanded)}
-              className="text-terminal-mid hover:text-terminal-white transition-colors"
+              className="text-xs text-accent hover:text-accent/80 transition-colors"
             >
-              {expanded ? "hide reasoning" : "show reasoning"}
+              {expanded ? "hide reasoning" : "view reasoning"}
             </button>
           </>
         )}
       </div>
       {expanded && claim.reasoning && (
-        <div className="mt-2.5 pt-2.5 border-t border-dashed border-terminal-borderDotted">
-          <p className="font-mono text-[0.68rem] text-terminal-mid leading-relaxed">
+        <div className="mt-3 pt-3 border-t border-terminal-border">
+          <p className="text-xs text-terminal-mid leading-relaxed font-mono">
             {claim.reasoning}
           </p>
-          {claim.supporting_sources.length > 0 && (
-            <div className="mt-2">
-              <span className="text-[0.62rem] text-terminal-dim">Supporting: </span>
-              <span className="text-[0.62rem] text-semantic-pass">
-                {claim.supporting_sources.length} source(s)
-              </span>
-            </div>
-          )}
-          {claim.contradicting_sources.length > 0 && (
-            <div className="mt-1">
-              <span className="text-[0.62rem] text-terminal-dim">Contradicting: </span>
-              <span className="text-[0.62rem] text-semantic-fail">
-                {claim.contradicting_sources.length} source(s)
-              </span>
-            </div>
-          )}
+          <div className="flex gap-4 mt-2">
+            {claim.supporting_sources.length > 0 && (
+              <span className="text-xs text-semantic-pass">{claim.supporting_sources.length} supporting</span>
+            )}
+            {claim.contradicting_sources.length > 0 && (
+              <span className="text-xs text-semantic-fail">{claim.contradicting_sources.length} contradicting</span>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -106,30 +89,21 @@ export function HITLFeedback({
   const [error, setError] = useState<string | null>(null);
 
   const handleActionClick = useCallback((action: FeedbackAction) => {
-    if (action === "approve" || action === "abort") {
-      // These don't need additional input
-      setSelectedAction(action);
-    } else {
-      // dig_deeper and correct need input
-      setSelectedAction(action);
-    }
+    setSelectedAction(action);
     setError(null);
   }, []);
 
   const handleSubmit = useCallback(async () => {
     if (!selectedAction) return;
-
-    // Validate input for actions that require it
     if ((selectedAction === "dig_deeper" || selectedAction === "correct") && !detailInput.trim()) {
       setError(selectedAction === "dig_deeper" ? "Please specify what to explore further" : "Please provide your correction");
       return;
     }
-
     try {
       await onSubmitFeedback(selectedAction, detailInput.trim() || undefined);
       setSelectedAction(null);
       setDetailInput("");
-    } catch (err) {
+    } catch {
       setError("Failed to submit feedback. Please try again.");
     }
   }, [selectedAction, detailInput, onSubmitFeedback]);
@@ -140,122 +114,99 @@ export function HITLFeedback({
     setError(null);
   }, []);
 
-  // Calculate claim statistics
   const supportedCount = claims.filter((c) => c.verdict === "supported").length;
   const contradictedCount = claims.filter((c) => c.verdict === "contradicted").length;
   const unverifiableCount = claims.filter((c) => c.verdict === "unverifiable").length;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-2.5 mb-5 pb-3 border-b border-dashed border-terminal-borderDotted">
-        <span className="w-2 h-2 rounded-full bg-semantic-unknown animate-pulse" />
-        <span className="font-mono text-[0.72rem] text-terminal-white uppercase tracking-wider">
-          checkpoint: human review required
-        </span>
+      <div className="flex items-center gap-2.5 pb-4 border-b border-terminal-border">
+        <span className="w-2 h-2 rounded-full bg-semantic-unknown animate-pulse flex-shrink-0" />
+        <span className="text-sm font-semibold text-terminal-white">Human Review Required</span>
       </div>
 
       {/* Summary */}
-      <div className="px-3.5 py-3 rounded-sm border border-dashed border-terminal-borderDotted bg-terminal-surface/30 mb-5">
-        <div className="font-mono text-[0.62rem] text-terminal-dim uppercase tracking-wider mb-2">
-          {"// findings summary"}
-        </div>
-        <p className="font-mono text-[0.76rem] text-terminal-mid leading-relaxed">
-          {summary || "The research phase has completed. Please review the claims below before proceeding to synthesis."}
+      <div className="border-l-4 border-accent/50 pl-4 py-1">
+        <p className="text-sm text-terminal-mid leading-relaxed">
+          {summary || "Research is complete. Please review the claims below before proceeding to synthesis."}
         </p>
       </div>
 
       {/* Statistics */}
-      <div className="flex gap-4 mb-5">
-        <div className="flex items-center gap-2 px-3 py-2 border border-dashed border-terminal-borderDotted rounded-sm">
-          <span className="text-semantic-pass text-[0.9rem]">OK</span>
-          <div>
-            <div className="font-mono text-[0.7rem] text-terminal-white">{supportedCount}</div>
-            <div className="font-mono text-[0.58rem] text-terminal-dim">supported</div>
+      <div className="grid grid-cols-4 gap-2">
+        {[
+          { count: supportedCount, label: "Supported", color: "text-semantic-pass", bg: "bg-semantic-passSubtle border-semantic-passBorder" },
+          { count: unverifiableCount, label: "Unverifiable", color: "text-semantic-unknown", bg: "bg-semantic-unknownSubtle border-semantic-unknownBorder" },
+          { count: contradictedCount, label: "Contradicted", color: "text-semantic-fail", bg: "bg-semantic-failSubtle border-semantic-failBorder" },
+          { count: Math.round(sourceQuality * 100), label: "Src Quality", color: "text-terminal-white", bg: "bg-terminal-surface border-terminal-border", suffix: "%" },
+        ].map(({ count, label, color, bg, suffix }) => (
+          <div key={label} className={`rounded-lg border p-3 text-center ${bg}`}>
+            <div className={`text-xl font-bold ${color}`}>{count}{suffix ?? ""}</div>
+            <div className="text-xs text-terminal-dim mt-0.5">{label}</div>
           </div>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-2 border border-dashed border-terminal-borderDotted rounded-sm">
-          <span className="text-semantic-unknown text-[0.9rem]">??</span>
-          <div>
-            <div className="font-mono text-[0.7rem] text-terminal-white">{unverifiableCount}</div>
-            <div className="font-mono text-[0.58rem] text-terminal-dim">unverifiable</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-2 border border-dashed border-terminal-borderDotted rounded-sm">
-          <span className="text-semantic-fail text-[0.9rem]">!!</span>
-          <div>
-            <div className="font-mono text-[0.7rem] text-terminal-white">{contradictedCount}</div>
-            <div className="font-mono text-[0.58rem] text-terminal-dim">contradicted</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-2 border border-dashed border-terminal-borderDotted rounded-sm">
-          <span className="text-terminal-mid text-[0.9rem]">Q</span>
-          <div>
-            <div className="font-mono text-[0.7rem] text-terminal-white">{Math.round(sourceQuality * 100)}%</div>
-            <div className="font-mono text-[0.58rem] text-terminal-dim">source quality</div>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Claims list */}
-      <div className="mb-6">
-        <div className="font-mono text-[0.62rem] text-terminal-dim uppercase tracking-wider mb-3">
-          {"// verified claims"} ({claims.length})
-        </div>
-        <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-terminal pr-1">
+      <div>
+        <h3 className="text-xs font-semibold text-terminal-dim uppercase tracking-wider mb-3">
+          Verified Claims ({claims.length})
+        </h3>
+        <div className="space-y-2 max-h-72 overflow-y-auto scrollbar-terminal pr-1">
           {claims.map((claim, index) => (
             <ClaimCard key={index} claim={claim} />
           ))}
         </div>
       </div>
 
-      {/* Action buttons */}
+      {/* Actions */}
       {!selectedAction ? (
-        <div className="space-y-3">
-          <div className="font-mono text-[0.62rem] text-terminal-dim uppercase tracking-wider">
-            {"// actions"}
-          </div>
-          <div className="flex flex-wrap gap-2.5">
+        <div className="space-y-3 pt-2">
+          <h3 className="text-xs font-semibold text-terminal-dim uppercase tracking-wider">Choose Action</h3>
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => handleActionClick("approve")}
               disabled={isSubmitting}
-              className="px-4 py-2 border border-semantic-pass/40 rounded-sm bg-semantic-pass/10 text-semantic-pass text-[0.74rem] font-mono cursor-pointer transition-all duration-200 hover:bg-semantic-pass/20 hover:border-semantic-pass/60 disabled:opacity-50"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-semantic-passBorder bg-semantic-passSubtle text-semantic-pass text-sm font-medium hover:brightness-110 transition-all disabled:opacity-50 col-span-2"
             >
-              approve & continue -&gt;
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              Approve & Continue to Synthesis
             </button>
             <button
               onClick={() => handleActionClick("dig_deeper")}
               disabled={isSubmitting}
-              className="px-4 py-2 border border-dashed border-terminal-borderDotted rounded-sm bg-transparent text-terminal-white text-[0.74rem] font-mono cursor-pointer transition-all duration-200 hover:border-terminal-mid hover:bg-white/[0.02] disabled:opacity-50"
+              className="px-4 py-2.5 rounded-lg border border-terminal-border bg-terminal-surface text-terminal-white text-sm font-medium hover:bg-terminal-surfaceHover hover:border-terminal-mid transition-all disabled:opacity-50"
             >
-              dig deeper
+              Dig Deeper
             </button>
             <button
               onClick={() => handleActionClick("correct")}
               disabled={isSubmitting}
-              className="px-4 py-2 border border-dashed border-terminal-borderDotted rounded-sm bg-transparent text-terminal-white text-[0.74rem] font-mono cursor-pointer transition-all duration-200 hover:border-terminal-mid hover:bg-white/[0.02] disabled:opacity-50"
+              className="px-4 py-2.5 rounded-lg border border-terminal-border bg-terminal-surface text-terminal-white text-sm font-medium hover:bg-terminal-surfaceHover hover:border-terminal-mid transition-all disabled:opacity-50"
             >
-              correct
+              Correct
             </button>
             <button
               onClick={() => handleActionClick("abort")}
               disabled={isSubmitting}
-              className="px-4 py-2 border border-dashed border-semantic-fail/40 rounded-sm bg-transparent text-semantic-fail text-[0.74rem] font-mono cursor-pointer transition-all duration-200 hover:bg-semantic-fail/10 disabled:opacity-50"
+              className="px-4 py-2.5 rounded-lg border border-semantic-failBorder bg-semantic-failSubtle text-semantic-fail text-sm font-medium hover:brightness-110 transition-all disabled:opacity-50 col-span-2"
             >
-              abort
+              Abort Research
             </button>
           </div>
         </div>
       ) : (
-        <div className="space-y-3 animate-slide-in">
-          {/* Action confirmation or input */}
+        <div className="space-y-3 animate-fade-in pt-2">
           {(selectedAction === "dig_deeper" || selectedAction === "correct") && (
             <>
-              <div className="font-mono text-[0.68rem] text-terminal-white">
+              <label className="block text-sm font-medium text-terminal-white">
                 {selectedAction === "dig_deeper"
-                  ? "What topic would you like to explore further?"
+                  ? "What would you like to explore further?"
                   : "What corrections would you like to provide?"}
-              </div>
+              </label>
               <textarea
                 value={detailInput}
                 onChange={(e) => setDetailInput(e.target.value)}
@@ -265,46 +216,44 @@ export function HITLFeedback({
                     : "e.g., The claim about X is incorrect because..."
                 }
                 rows={3}
-                className="w-full bg-terminal-surface border border-dashed border-terminal-borderDotted rounded-sm p-2.5 text-terminal-white placeholder:text-terminal-dim resize-none outline-none font-mono text-[0.76rem] focus:border-terminal-mid transition-colors"
+                className="w-full bg-terminal-surface border border-terminal-border rounded-lg p-3 text-terminal-white placeholder:text-terminal-dim resize-none outline-none text-sm focus:border-accent/60 focus:ring-2 focus:ring-accent/20 transition-all"
               />
             </>
           )}
 
           {(selectedAction === "approve" || selectedAction === "abort") && (
-            <div className="font-mono text-[0.72rem] text-terminal-mid">
+            <p className="text-sm text-terminal-mid">
               {selectedAction === "approve"
                 ? "Confirm: Continue to synthesis with current findings?"
-                : "Confirm: Abort and discard research?"}
-            </div>
+                : "Confirm: Abort and discard all research?"}
+            </p>
           )}
 
           {error && (
-            <div className="font-mono text-[0.68rem] text-semantic-fail animate-fade-in">
-              {error}
-            </div>
+            <p className="text-sm text-semantic-fail animate-fade-in">{error}</p>
           )}
 
           <div className="flex gap-2.5">
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className={`px-4 py-2 border rounded-sm text-[0.74rem] font-mono cursor-pointer transition-all duration-200 disabled:opacity-50 flex items-center gap-2 ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all disabled:opacity-50 ${
                 selectedAction === "abort"
-                  ? "border-semantic-fail/40 bg-semantic-fail/10 text-semantic-fail hover:bg-semantic-fail/20"
-                  : "border-semantic-pass/40 bg-semantic-pass/10 text-semantic-pass hover:bg-semantic-pass/20"
+                  ? "border-semantic-failBorder bg-semantic-failSubtle text-semantic-fail hover:brightness-110"
+                  : "border-semantic-passBorder bg-semantic-passSubtle text-semantic-pass hover:brightness-110"
               }`}
             >
               {isSubmitting && (
-                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               )}
-              {isSubmitting ? "submitting..." : "confirm"}
+              {isSubmitting ? "Submitting..." : "Confirm"}
             </button>
             <button
               onClick={handleCancel}
               disabled={isSubmitting}
-              className="px-4 py-2 border border-dashed border-terminal-borderDotted rounded-sm bg-transparent text-terminal-dim text-[0.74rem] font-mono cursor-pointer transition-all duration-200 hover:text-terminal-white disabled:opacity-50"
+              className="px-4 py-2 rounded-lg border border-terminal-border bg-transparent text-terminal-dim text-sm font-medium hover:text-terminal-white hover:border-terminal-mid transition-all disabled:opacity-50"
             >
-              cancel
+              Cancel
             </button>
           </div>
         </div>
@@ -313,7 +262,6 @@ export function HITLFeedback({
   );
 }
 
-// Compact inline version for overlay/modal
 export function HITLFeedbackModal({
   isOpen,
   onClose,
@@ -322,17 +270,20 @@ export function HITLFeedbackModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-terminal-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-terminal-black border border-dashed border-terminal-borderDotted rounded-sm p-6 shadow-2xl scrollbar-terminal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fade-in">
+      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-terminal-black border border-terminal-border rounded-xl p-6 shadow-2xl scrollbar-terminal">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-terminal-dim hover:text-terminal-white transition-colors text-lg"
+          className="absolute top-4 right-4 text-terminal-dim hover:text-terminal-white transition-colors"
           aria-label="Close"
         >
-          x
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
         </button>
         <HITLFeedback {...props} />
       </div>
     </div>
   );
 }
+

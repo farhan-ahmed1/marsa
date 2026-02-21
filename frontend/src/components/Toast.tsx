@@ -67,28 +67,63 @@ function ToastItem({ toast, onRemove }: { toast: Toast; onRemove: (id: string) =
     }
   }, [toast.id, toast.duration, onRemove]);
 
-  const typeStyles: Record<ToastType, { border: string; icon: string; iconColor: string }> = {
-    info: { border: "border-terminal-mid", icon: "i", iconColor: "text-terminal-mid" },
-    success: { border: "border-semantic-pass", icon: "OK", iconColor: "text-semantic-pass" },
-    warning: { border: "border-semantic-unknown", icon: "!!", iconColor: "text-semantic-unknown" },
-    error: { border: "border-semantic-fail", icon: "XX", iconColor: "text-semantic-fail" },
+  const typeStyles: Record<ToastType, { border: string; iconEl: React.ReactNode; bg: string }> = {
+    info: {
+      border: "border-terminal-border",
+      bg: "bg-terminal-surface",
+      iconEl: (
+        <svg className="w-4 h-4 text-terminal-mid" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+    success: {
+      border: "border-semantic-passBorder",
+      bg: "bg-semantic-passSubtle",
+      iconEl: (
+        <svg className="w-4 h-4 text-semantic-pass" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ),
+    },
+    warning: {
+      border: "border-semantic-unknownBorder",
+      bg: "bg-semantic-unknownSubtle",
+      iconEl: (
+        <svg className="w-4 h-4 text-semantic-unknown" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+        </svg>
+      ),
+    },
+    error: {
+      border: "border-semantic-failBorder",
+      bg: "bg-semantic-failSubtle",
+      iconEl: (
+        <svg className="w-4 h-4 text-semantic-fail" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      ),
+    },
   };
 
   const style = typeStyles[toast.type];
 
   return (
     <div
-      className={`flex items-start gap-2.5 px-3.5 py-3 bg-terminal-black border border-dashed ${style.border} rounded-sm shadow-lg animate-slide-left`}
+      className={`flex items-start gap-3 px-4 py-3 border rounded-lg shadow-lg animate-slide-left ${style.border} ${style.bg}`}
     >
-      <span className={`font-mono text-[0.7rem] ${style.iconColor} flex-shrink-0`}>{style.icon}</span>
-      <p className="font-mono text-[0.72rem] text-terminal-white leading-relaxed flex-1">{toast.message}</p>
+      <span className="flex-shrink-0 mt-0.5">{style.iconEl}</span>
+      <p className="text-sm text-terminal-white leading-relaxed flex-1">{toast.message}</p>
       <button
         onClick={() => onRemove(toast.id)}
-        className="text-terminal-dim hover:text-terminal-white transition-colors text-sm flex-shrink-0"
+        className="text-terminal-dim hover:text-terminal-white transition-colors flex-shrink-0 mt-0.5"
         aria-label="Dismiss"
       >
-        x
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
       </button>
     </div>
   );
 }
+

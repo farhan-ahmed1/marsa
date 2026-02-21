@@ -7,72 +7,61 @@ interface PipelineProps {
   status: StreamStatus;
 }
 
-const STEPS: AgentName[] = ["planner", "researcher", "fact_checker", "synthesizer"];
-
-function Dot({ on = false }: { on?: boolean }) {
-  return (
-    <span
-      className={`inline-block w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-        on ? "bg-terminal-white shadow-[0_0_6px_rgba(255,255,255,0.3)]" : "bg-terminal-dim"
-      }`}
-    />
-  );
-}
+const STEPS: { id: AgentName; label: string; color: string; activeBg: string; doneBg: string }[] = [
+  { id: "planner",      label: "Plan",     color: "text-blue-400",    activeBg: "bg-blue-400/20 border-blue-400/40",    doneBg: "bg-blue-500 border-blue-500" },
+  { id: "researcher",   label: "Research", color: "text-emerald-400", activeBg: "bg-emerald-400/20 border-emerald-400/40", doneBg: "bg-emerald-500 border-emerald-500" },
+  { id: "fact_checker", label: "Verify",   color: "text-amber-400",   activeBg: "bg-amber-400/20 border-amber-400/40",   doneBg: "bg-amber-500 border-amber-500" },
+  { id: "synthesizer",  label: "Synthesize",color: "text-violet-400", activeBg: "bg-violet-400/20 border-violet-400/40", doneBg: "bg-violet-500 border-violet-500" },
+];
 
 export function Pipeline({ currentAgent, status }: PipelineProps) {
   if (status === "idle") return null;
 
-  const currentIndex = currentAgent ? STEPS.indexOf(currentAgent) : -1;
+  const currentIndex = currentAgent ? STEPS.findIndex((s) => s.id === currentAgent) : -1;
 
   return (
-    <div className="flex items-center px-6 py-2.5 border-b border-dashed border-terminal-borderDotted animate-fade-in">
+    <div className="flex items-center px-6 py-2 border-b border-terminal-border bg-terminal-surface/50 animate-fade-in">
       {STEPS.map((step, i) => {
         const done = i < currentIndex || status === "complete";
-        const active = step === currentAgent;
+        const active = step.id === currentAgent;
 
         return (
-          <div key={step} className="flex items-center flex-1">
-            <div className="flex items-center gap-1.5">
-              {/* Step circle */}
+          <div key={step.id} className="flex items-center flex-1">
+            <div className="flex items-center gap-2">
+              {/* Circle */}
               <div
-                className={`w-[22px] h-[22px] rounded-full flex items-center justify-center transition-all duration-300 ${
+                className={`w-6 h-6 rounded-full border flex items-center justify-center transition-all duration-300 ${
                   done
-                    ? "border-[1.5px] border-terminal-white bg-terminal-white"
+                    ? step.doneBg
                     : active
-                    ? "border-[1.5px] border-terminal-white shadow-[0_0_10px_rgba(255,255,255,0.12)]"
-                    : "border border-dashed border-terminal-borderDotted"
+                    ? step.activeBg
+                    : "border-terminal-border bg-transparent"
                 }`}
               >
                 {done ? (
-                  <span className="text-terminal-black text-[0.6rem] font-bold">
-                    {"\u2713"}
-                  </span>
+                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
                 ) : active ? (
-                  <Dot on />
+                  <span className={`w-2 h-2 rounded-full ${step.color.replace("text-", "bg-")} animate-pulse`} />
                 ) : (
-                  <span className="w-[3px] h-[3px] rounded-full bg-terminal-dim" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-terminal-border" />
                 )}
               </div>
 
-              {/* Step label */}
+              {/* Label */}
               <span
-                className={`font-mono text-[0.68rem] transition-all duration-300 ${
-                  done || active ? "text-terminal-white" : "text-terminal-dim"
+                className={`text-xs font-medium transition-all duration-300 ${
+                  done || active ? step.color : "text-terminal-dim"
                 }`}
               >
-                {step.replace("_", " ")}
+                {step.label}
               </span>
             </div>
 
-            {/* Connector line */}
+            {/* Connector */}
             {i < STEPS.length - 1 && (
-              <div
-                className={`flex-1 mx-2.5 transition-all duration-400 ${
-                  done
-                    ? "border-t border-terminal-dim"
-                    : "border-t border-dashed border-terminal-borderDotted"
-                }`}
-              />
+              <div className={`flex-1 mx-3 h-px transition-all duration-500 ${done ? "bg-terminal-mid" : "bg-terminal-border"}`} />
             )}
           </div>
         );

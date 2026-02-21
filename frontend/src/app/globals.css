@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,27 +6,26 @@
 
 @layer base {
   :root {
-    /* Terminal monochrome palette */
-    --background: 0 0% 5%;         /* #0C0C0C */
-    --foreground: 0 0% 88%;        /* #E0E0E0 */
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 88%;
-    --popover: 0 0% 8%;
-    --popover-foreground: 0 0% 88%;
-    --primary: 0 0% 88%;           /* #E0E0E0 */
-    --primary-foreground: 0 0% 5%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 88%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 60%;  /* #999 */
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 88%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 88%;
-    --border: 0 0% 35%;            /* #5A5A5A */
-    --input: 0 0% 15%;
-    --ring: 0 0% 60%;
-    --radius: 0;
+    --background: 222 20% 7%;
+    --foreground: 214 32% 91%;
+    --card: 222 20% 10%;
+    --card-foreground: 214 32% 91%;
+    --popover: 222 20% 10%;
+    --popover-foreground: 214 32% 91%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 20% 7%;
+    --secondary: 222 20% 14%;
+    --secondary-foreground: 214 32% 91%;
+    --muted: 222 20% 14%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 222 20% 7%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 214 32% 91%;
+    --border: 217 19% 20%;
+    --input: 222 20% 14%;
+    --ring: 217 91% 60%;
+    --radius: 0.375rem;
   }
 }
 
@@ -35,54 +34,43 @@
     @apply border-border;
   }
   html {
-    font-size: 14px;
+    font-size: 16px;
   }
   body {
-    @apply bg-terminal-black text-terminal-white font-mono antialiased;
+    @apply bg-terminal-black text-terminal-white antialiased;
+    font-family: 'Inter', -apple-system, sans-serif;
   }
   ::selection {
-    background: rgba(255, 255, 255, 0.15);
-  }
-}
-
-@layer components {
-  /* Dashed border utility */
-  .border-dashed-terminal {
-    border: 1px dashed #333333;
-  }
-
-  /* Comment label style */
-  .comment-label {
-    @apply text-terminal-dim text-xs font-mono uppercase tracking-wider;
-  }
-
-  /* Terminal prompt prefix */
-  .terminal-prompt::before {
-    content: "$ ";
-    @apply text-terminal-mid;
+    background: rgba(59, 130, 246, 0.3);
   }
 }
 
 @layer utilities {
-  /* Scrollbar styling */
+  /* Subtle scrollbar */
   ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+    width: 5px;
+    height: 5px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #2a2a2a;
+    background: #2D3748;
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3a3a3a;
+    background: #374151;
   }
 
-  /* Custom focus styles */
   input:focus,
   textarea:focus {
     outline: none;
   }
+
+  /* Agent badge colors */
+  .agent-planner    { @apply text-blue-400 bg-blue-400/10 border-blue-400/30; }
+  .agent-researcher { @apply text-emerald-400 bg-emerald-400/10 border-emerald-400/30; }
+  .agent-fact_checker { @apply text-amber-400 bg-amber-400/10 border-amber-400/30; }
+  .agent-synthesizer  { @apply text-violet-400 bg-violet-400/10 border-violet-400/30; }
+  .agent-system     { @apply text-slate-400 bg-slate-400/10 border-slate-400/30; }
 }
