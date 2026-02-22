@@ -57,7 +57,7 @@ You'll need API keys from three services:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/marsa.git
+git clone https://github.com/farhan-ahmed1/marsa.git
 cd marsa
 ```
 
@@ -398,7 +398,7 @@ python backend/scripts/ingest_docs.py
 
 If you encounter issues not covered here:
 
-1. Check the [GitHub Issues](https://github.com/yourusername/marsa/issues)
+1. Check the [GitHub Issues](https://github.com/farhan-ahmed1/marsa/issues)
 2. Search existing issues for similar problems
 3. Open a new issue with:
    - OS and Python/Node versions
