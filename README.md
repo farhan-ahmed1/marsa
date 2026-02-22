@@ -1,180 +1,236 @@
 # MARSA
 
-**Multi-Agent ReSearch Assistant** - A multi-agent system that orchestrates specialized AI agents via LangGraph with MCP-connected data sources to produce well-sourced research reports.
+[![CI Pipeline](https://github.com/yourusername/marsa/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/marsa/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-## Overview
+**Multi-Agent ReSearch Assistant** - A production-grade multi-agent system that orchestrates specialized AI agents via LangGraph with MCP-connected data sources to produce well-sourced, fact-checked research reports.
 
-MARSA takes complex questions and produces comprehensive reports with transparent agent activity tracking, source quality scoring, and human-in-the-loop checkpoints.
+<!-- TODO: Add demo GIF here once recorded -->
+<!-- ![MARSA Demo](docs/assets/demo.gif) -->
 
-```bash
-Query --> Planner --> Researcher(s) --> Fact-Checker --> Synthesizer --> Report
-                          |                  |
-                          +------------------+ (loop if issues found)
+---
+
+## What is MARSA?
+
+Complex research questions often require synthesizing information from multiple sources, verifying claims against independent evidence, and presenting findings with proper citations. MARSA automates this workflow using a team of specialized AI agents - each focused on one aspect of research - orchestrated through LangGraph's state machine architecture. Unlike typical RAG chatbots, MARSA provides transparent agent activity tracking, source quality scoring, and human-in-the-loop checkpoints for critical research decisions.
+
+---
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Frontend["Next.js Frontend"]
+        UI[Query UI]
+        Trace[Agent Trace]
+        Report[Report View]
+    end
+
+    subgraph Backend["FastAPI Backend"]
+        subgraph Graph["LangGraph Workflow"]
+            P[Planner]
+            R[Researcher]
+            FC[Fact-Checker]
+            S[Synthesizer]
+        end
+        
+        subgraph MCP["MCP Servers"]
+            Tavily[Tavily Search]
+            ChromaDB[Document Store]
+        end
+    end
+    
+    UI -->|SSE Stream| Graph
+    P --> R
+    R --> FC
+    FC -->|Loop if issues| R
+    FC --> S
+    S --> Report
+    R <--> MCP
+    FC <--> MCP
+    
+    style Graph fill:#e1f5fe
+    style MCP fill:#fff3e0
 ```
 
-**Agents:**
+**Data Flow:** Query &rarr; Planner &rarr; Researcher(s) &rarr; Fact-Checker &rarr; Synthesizer &rarr; Report
 
-- **Planner**: Decomposes queries, determines strategy (parallel vs sequential, web vs docs)
-- **Researcher**: Executes sub-queries via MCP servers, extracts claims
-- **Fact-Checker**: Verifies claims with independent searches, scores sources
-- **Synthesizer**: Produces final report with inline citations
+For detailed architecture diagrams including LangGraph workflow and MCP interactions, see [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Features
+
+- **Multi-Agent Orchestration**: Four specialized agents (Planner, Researcher, Fact-Checker, Synthesizer) collaborate through a LangGraph state machine
+- **Parallel Research Execution**: Multi-faceted queries fan out to parallel researcher instances for faster results
+- **Source Quality Scoring**: Weighted scoring based on domain authority (40%), recency (30%), and content depth (30%)
+- **Fact-Check Loop**: Claims are verified against independent sources; failed verification triggers re-research
+- **Human-in-the-Loop Checkpoints**: Pause after fact-checking for user feedback before final synthesis
+- **Cross-Session Memory**: Prior research context is retrieved for related follow-up queries
+- **Real-Time Observability**: SSE-streamed agent trace with timeline visualization in the UI
+- **MCP-Based Data Access**: Clean separation between agents and data sources via Model Context Protocol
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone and install
+git clone https://github.com/yourusername/marsa.git
+cd marsa
+make setup
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your API keys (see Environment Variables below)
+
+# 3. Run the application
+make dev  # Starts both backend and frontend
+
+# 4. Open http://localhost:3000
+```
+
+For detailed setup instructions including Docker deployment, see [docs/setup.md](docs/setup.md).
+
+---
+
+## Evaluation Results
+
+Evaluation run on 20 test queries across 5 categories (factual, comparison, exploratory, doc_context, false_premise):
+
+| Metric | Target | Achieved |
+| -------- | -------- | ---------- |
+| Citation Accuracy | >= 85% | **100%** |
+| Fact-Check Pass Rate | >= 70% | **85.3%** |
+| False Premise Recall | >= 70% | **100%** |
+| End-to-End Latency (p50) | < 30s | **10.7s** |
+| End-to-End Latency (p95) | < 60s | **14.5s** |
+| Average Quality Score | >= 3.5/5 | **3.68/5** |
+
+<details>
+<summary>Metrics by Category</summary>
+
+| Category | Queries | Avg Quality | Avg Latency |
+| ---------- | --------- | ------------- | ------------- |
+| Factual | 5 | 4.11/5 | 11.6s |
+| Comparison | 5 | 4.01/5 | 9.7s |
+| Exploratory | 5 | 3.30/5 | 10.3s |
+| Doc Context | 2 | 3.58/5 | 10.1s |
+| False Premise | 3 | 3.57/5 | 10.0s |
+
+</details>
+
+Run the evaluation suite: `make eval`
+
+---
 
 ## Tech Stack
 
-| Layer | Technology |
-| ------- | ------------ |
-| LLM | Claude API (Anthropic) |
-| Orchestration | LangGraph (Python) |
-| MCP Servers | fastmcp |
-| Vector DB | ChromaDB |
-| Embeddings | OpenAI text-embedding-3-small |
-| Search | Tavily |
-| Backend | FastAPI |
-| Frontend | Next.js + Tailwind + shadcn/ui |
+| Layer | Technology | Purpose |
+| ------- | ------------ | --------- |
+| LLM | Claude API (Anthropic) | Agent reasoning and synthesis |
+| Orchestration | LangGraph (Python) | State machine with conditional routing |
+| MCP Servers | fastmcp | Standardized tool/data access |
+| Vector DB | ChromaDB | Document storage and similarity search |
+| Embeddings | OpenAI text-embedding-3-small | Document vectorization |
+| Web Search | Tavily | Real-time web search API |
+| Backend | FastAPI | Async API with SSE streaming |
+| Frontend | Next.js + Tailwind + shadcn/ui | Real-time UI with agent trace |
+| State Persistence | SQLite | LangGraph checkpointer |
+| Observability | LangSmith | Tracing and debugging |
 
-## Setup
-
-### Prerequisites
-
-- Python 3.12+
-- Node.js 20+
-- API keys for:
-  - [Anthropic Claude](https://console.anthropic.com/) - LLM for agents
-  - [OpenAI](https://platform.openai.com/api-keys) - Embeddings
-  - [Tavily](https://tavily.com/) - Web search (free tier: 1,000/month)
-
-### Quick Start
-
-1. **Clone and install dependencies:**
-
-   ```bash
-   git clone https://github.com/yourusername/marsa.git
-   cd marsa
-   make setup
-   ```
-
-2. **Configure API keys:**
-
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your API keys:
-   # ANTHROPIC_API_KEY=sk-ant-...
-   # OPENAI_API_KEY=sk-...
-   # TAVILY_API_KEY=tvly-...
-   ```
-
-3. **Ingest sample documents (optional):**
-
-   ```bash
-   python backend/scripts/ingest_docs.py
-   ```
-
-4. **Run the application:**
-
-   ```bash
-   # Terminal 1: Backend
-   make run-backend
-   
-   # Terminal 2: Frontend
-   make run-frontend
-   ```
-
-5. **Open the UI:** Navigate to `http://localhost:3000`
-
-### Development Commands
-
-| Command | Description |
-| --------- | ------------- |
-| `make setup` | Install all dependencies (Python + Node.js) |
-| `make test` | Run unit tests |
-| `make test:integration` | Run integration tests (uses real APIs) |
-| `make lint` | Lint code (ruff + eslint) |
-| `make format` | Format code |
-| `make run-backend` | Start FastAPI server |
-| `make run-frontend` | Start Next.js dev server |
-| `make docker` | Run with Docker Compose |
-
-### Running MCP Servers Manually
-
-For debugging or development:
-
-```bash
-# Tavily Search Server
-python -m fastmcp dev backend/mcp_servers/tavily_search.py
-
-# Document Store Server
-python -m fastmcp dev backend/mcp_servers/document_store.py
-```
-
-### Testing the Pipeline
-
-```bash
-# Run a manual test
-python backend/manual_test_mcp.py
-
-# Run the full test suite
-make test
-```
+---
 
 ## Project Structure
 
 ```bash
 marsa/
-+-- backend/
-|   +-- agents/           # AI agents (planner, researcher, fact_checker, synthesizer)
-|   +-- mcp_servers/      # MCP server implementations
-|   +-- graph/            # LangGraph workflow and state
-|   +-- api/              # FastAPI endpoints
-|   +-- tests/            # Unit and integration tests
-|   +-- mcp_client.py     # Unified MCP client wrapper
-|   +-- config.py         # Configuration management
-+-- frontend/
-|   +-- src/app/          # Next.js pages
-|   +-- src/components/   # React components
-|   +-- src/hooks/        # Custom hooks (useAgentStream)
-+-- data/
-|   +-- chromadb/         # Vector database storage
-|   +-- sample_docs/      # Sample documents for ingestion
-+-- docs/
-|   +-- architecture.md   # System architecture
-|   +-- design-decisions.md # Design rationale
+├── backend/
+│   ├── agents/              # AI agents (planner, researcher, fact_checker, synthesizer)
+│   ├── mcp_servers/         # MCP server implementations (tavily, document_store)
+│   ├── graph/               # LangGraph workflow, state schema, checkpointer
+│   ├── api/                 # FastAPI routes, SSE streaming
+│   ├── memory/              # Cross-session memory layer
+│   ├── eval/                # Evaluation framework and test queries
+│   ├── utils/               # Rate limiting, resilience utilities
+│   └── tests/               # Unit and integration tests
+├── frontend/
+│   └── src/
+│       ├── app/             # Next.js pages
+│       ├── components/      # React components (QueryInput, AgentTrace, ReportView)
+│       └── hooks/           # Custom hooks (useAgentStream)
+├── data/
+│   ├── chromadb/            # Vector database storage
+│   └── eval_results/        # Evaluation run outputs
+├── docs/
+│   ├── architecture.md      # System design diagrams
+│   ├── design-decisions.md  # Technical rationale
+│   └── setup.md             # Installation guide
+└── docker-compose.yml       # Container orchestration
 ```
-
-## Architecture
-
-### MCP Servers
-
-MARSA uses Model Context Protocol (MCP) servers as the data access layer:
-
-1. **Tavily Search** (`tavily_search.py`) - Web search with rate limiting
-2. **Document Store** (`document_store.py`) - ChromaDB vector search with OpenAI embeddings
-
-Agents interact with these servers through a unified client (`mcp_client.py`) that handles connection management, error handling, and retries.
-
-### Source Quality Scoring
-
-Not all sources are equal. MARSA scores source quality based on:
-
-- **Domain authority** (40%): `.gov`/`.edu` = 0.9, arxiv/ACM = 0.85, docs = 0.8, blogs = 0.6
-- **Recency** (30%): <3 months = 1.0, <6 months = 0.8, <1 year = 0.6
-- **Content depth** (30%): >2000 words = 0.8, >500 words = 0.6
-
-See [docs/design-decisions.md](docs/design-decisions.md) for methodology details.
-
-## Documentation
-
-- [Architecture](docs/architecture.md) - System design and data flow
-- [Design Decisions](docs/design-decisions.md) - Rationale for technical choices
-- [Setup Guide](docs/setup.md) - Detailed installation instructions
-
-## CI/CD
-
-The project uses GitHub Actions for automated testing and linting. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
-
-## License
-
-MIT
 
 ---
 
-**Note:** This project is in active development.
+## Development Commands
+
+| Command | Description |
+| --------- | ------------- |
+| `make setup` | Install all dependencies (Python + Node.js) |
+| `make dev` | Run backend and frontend concurrently |
+| `make test` | Run unit tests |
+| `make test:integration` | Run integration tests (uses real APIs) |
+| `make lint` | Lint code (ruff + eslint) |
+| `make docker` | Run with Docker Compose |
+| `make eval` | Run full evaluation suite |
+| `make eval:quick` | Run quick evaluation (3 queries) |
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+| ---------- | ---------- | ------------- |
+| `ANTHROPIC_API_KEY` | Yes | Claude API key for agent LLM calls |
+| `OPENAI_API_KEY` | Yes | OpenAI API key for embeddings |
+| `TAVILY_API_KEY` | Yes | Tavily API key for web search |
+| `LANGCHAIN_TRACING_V2` | No | Set to `true` to enable LangSmith tracing |
+| `LANGCHAIN_API_KEY` | No | LangSmith API key (if tracing enabled) |
+| `LOG_LEVEL` | No | Logging level (default: `INFO`) |
+
+---
+
+## Documentation
+
+- [Architecture](docs/architecture.md) - System diagrams, LangGraph workflow, data flow
+- [Design Decisions](docs/design-decisions.md) - Rationale for technical choices
+- [Setup Guide](docs/setup.md) - Detailed installation and troubleshooting
+
+---
+
+## Contributing
+
+Contributions are welcome. Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Run `make lint` and `make test` before submitting.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+- [Anthropic](https://anthropic.com/) for Claude and the Model Context Protocol
+- [LangGraph](https://github.com/langchain-ai/langgraph) for the agent orchestration framework
+- [Tavily](https://tavily.com/) for the AI-focused search API

@@ -1,6 +1,54 @@
 # Design Decisions
 
-## MCP (Model Context Protocol)
+This document explains the rationale behind key technical decisions in MARSA. Each section covers the problem, the alternatives considered, and why we chose a particular approach.
+
+## Table of Contents
+
+- [Orchestration Framework](#orchestration-framework)
+- [MCP Architecture](#mcp-architecture)
+- [State Schema Design](#state-schema-design)
+- [Parallel Execution](#parallel-execution)
+- [Human-in-the-Loop Design](#human-in-the-loop-design)
+- [Source Quality Scoring](#source-quality-scoring-methodology)
+- [Cross-Session Memory](#cross-session-memory)
+- [Trade-offs and Future Improvements](#trade-offs-and-future-improvements)
+
+---
+
+## Orchestration Framework
+
+### Decision: LangGraph over CrewAI, AutoGen, and Custom Solutions
+
+**Context**: We needed a framework to orchestrate multiple AI agents through a research pipeline with conditional routing, loops, and state persistence.
+
+**Alternatives Considered**:
+
+| Framework | Pros | Cons |
+| ----------- | ------ | ------ |
+| **LangGraph** | Explicit state machine, conditional edges, checkpointing, mature | Steeper learning curve |
+| **CrewAI** | Simple agent definitions, role-based | Less control over flow, implicit orchestration |
+| **AutoGen** | Multi-agent conversations, Microsoft backing | Conversation-centric, harder to enforce pipeline |
+| **Custom** | Full control | Significant implementation effort for state, routing, persistence |
+
+**Decision**: LangGraph
+
+**Rationale**:
+
+1. **Explicit control flow**: Research pipelines need deterministic routing. LangGraph's `add_conditional_edges` lets us define exactly when to loop back (failed verification) or proceed (claims verified).
+
+2. **State machine model**: The StateGraph abstraction matches our mental model - each agent is a node that transforms state. This makes the pipeline easy to reason about and debug.
+
+3. **Built-in checkpointing**: SQLite and memory-based checkpointers give us state persistence "for free." This is critical for human-in-the-loop workflows and debugging.
+
+4. **Parallel execution**: The `Send` API enables fan-out to parallel workers, which maps directly to our parallel sub-query research feature.
+
+5. **LangChain ecosystem**: Integration with LangSmith for observability, familiar tooling patterns, strong documentation.
+
+**Trade-off accepted**: LangGraph has a steeper learning curve than CrewAI. However, the explicit control is worth it for a production-grade system where we need to understand exactly what's happening.
+
+---
+
+## MCP Architecture
 
 ### What is MCP?
 
@@ -161,6 +209,113 @@ results = await mcp_client.web_search("query")
 ```
 
 This abstraction keeps agent code clean and makes it easy to swap MCP implementations later.
+
+---
+
+## Parallel Execution
+
+### Decision: LangGraph Send API for Fan-Out/Merge
+
+**Context**: Multi-faceted queries like "Compare Rust vs Go for distributed systems" benefit from researching each aspect in parallel rather than sequentially.
+
+**Alternatives Considered**:
+
+| Approach | Pros | Cons |
+| ---------- | ------ | ------ |
+| **Sequential** | Simple, predictable | Slow for 3+ sub-queries |
+| **asyncio.gather** | Fast, built-in | Complex state merging, no checkpointing |
+| **LangGraph Send** | Native to framework, checkpointed, clean merge | Requires understanding Send API |
+| **Celery/Ray** | Distributed execution | Over-engineered for this scale |
+
+**Decision**: LangGraph Send API
+
+**Implementation**:
+
+```python
+def route_sub_queries(state: AgentState) -> Union[list[Send], Literal["research_sequential"]]:
+    """Route sub-queries for parallel or sequential execution."""
+    plan = state.get("plan")
+    
+    if plan.parallel and len(plan.sub_queries) >= 2:
+        # Fan out to parallel workers
+        return [
+            Send("research_sub_query", {"sub_query": sq, "parent_state": state})
+            for sq in plan.sub_queries
+        ]
+    
+    return "research_sequential"
+```
+
+**Rationale**:
+
+1. **Framework-native**: Send API is built for this exact use case. Each parallel branch gets its own state copy, and LangGraph handles the merge.
+
+2. **Checkpointed**: Each parallel execution is captured in the checkpoint, enabling debugging and replay.
+
+3. **Adaptive**: The Planner decides whether to use parallel execution based on query complexity. Simple queries run sequentially to avoid overhead.
+
+4. **Spool connection**: This pattern mirrors distributed task systems - fan out work to workers, merge results. It demonstrates understanding of distributed systems principles.
+
+**Performance impact**: For a 3-way comparison query, parallel execution reduces latency from ~30s (sequential) to ~12s (parallel, limited by slowest sub-query).
+
+---
+
+## Human-in-the-Loop Design
+
+### Decision: Interrupt After Fact-Checking, Before Synthesis
+
+**Context**: For critical research, users may want to review claims and provide feedback before the final report is generated.
+
+**Design Choices**:
+
+| Checkpoint Location | Pros | Cons |
+| --------------------- | ------ | ------ |
+| After planning | User can modify sub-queries | Too early, no research to review |
+| After research | Review raw findings | Claims not yet verified |
+| **After fact-checking** | Review verified claims | Optimal - all verification done |
+| After synthesis | Review final report | Too late to influence research |
+
+**Decision**: Interrupt after fact-checking
+
+**Implementation**:
+
+```python
+# Compile with interrupt
+compile_kwargs = {
+    "checkpointer": checkpointer,
+    "interrupt_after": ["fact_checker"]  # Pause after fact-checking
+}
+app = workflow.compile(**compile_kwargs)
+```
+
+**Feedback Actions**:
+
+| Action | Behavior |
+| -------- | ---------- |
+| `approve` | Proceed to synthesis with current claims |
+| `dig_deeper` | Return to planner with new focus topic |
+| `abort` | End workflow immediately |
+
+**Critical Implementation Detail**: The same `InMemorySaver` instance must be used for both the initial run and the resume. Creating a new checkpointer would lose all state:
+
+```python
+# Module-level singleton - CRITICAL for HITL
+_shared_memory_checkpointer: Optional[InMemorySaver] = None
+
+def get_shared_checkpointer() -> InMemorySaver:
+    global _shared_memory_checkpointer
+    if _shared_memory_checkpointer is None:
+        _shared_memory_checkpointer = InMemorySaver()
+    return _shared_memory_checkpointer
+```
+
+**Rationale**:
+
+1. **Informed decision**: Users see verified claims with confidence scores, not raw research dump.
+
+2. **Actionable feedback**: "Dig deeper" loops back to planning with user's focus area, enabling iterative refinement.
+
+3. **Non-blocking for simple queries**: HITL is opt-in via `enable_hitl=True`. Default workflows run to completion.
 
 ---
 
@@ -342,3 +497,109 @@ The source scorer integrates at multiple points:
 3. **Content analysis**: NLP to detect opinion vs. fact, bias indicators
 4. **Dynamic updates**: Track source quality over time
 5. **User preferences**: Allow domain-specific scoring adjustments
+
+---
+
+## Cross-Session Memory
+
+### Decision: ChromaDB-Based Memory with Similarity Retrieval
+
+**Context**: Follow-up queries often relate to prior research. Rather than starting fresh, we can retrieve relevant verified findings from past sessions.
+
+**Design Choices**:
+
+| Approach | Pros | Cons |
+| ---------- | ------ | ------ |
+| **No memory** | Simple, stateless | Redundant research on related queries |
+| **Full session replay** | Complete context | Too much context, slow, expensive |
+| **Keyword matching** | Fast, simple | Misses semantic similarity |
+| **Vector similarity** | Semantic understanding | Requires embedding + retrieval |
+
+**Decision**: Vector similarity search over prior verified claims
+
+**Implementation**:
+
+```python
+def get_relevant_memories(query: str, threshold: float = 0.7) -> str:
+    """Retrieve relevant prior research context."""
+    # Embed the query
+    query_embedding = embed_text(query)
+    
+    # Search memory collection
+    results = memory_collection.query(
+        query_embeddings=[query_embedding],
+        n_results=5,
+        where={"verification_status": "verified"}
+    )
+    
+    # Filter by similarity threshold and format
+    return format_memory_context(results, threshold)
+```
+
+**What Gets Stored**:
+
+| Field | Description |
+| ------- | ------------- |
+| `topics` | Main topics from the research |
+| `verified_claims` | Claims that passed fact-checking |
+| `source_quality` | Average source quality score |
+| `timestamp` | When research was conducted |
+
+**Rationale**:
+
+1. **Reduced redundancy**: If user asked about "Rust concurrency" before, a follow-up on "Rust async/await" retrieves relevant prior findings.
+
+2. **Verified only**: We only store claims that passed fact-checking, avoiding propagation of unverified information.
+
+3. **Threshold filtering**: Low-similarity matches are filtered out to avoid irrelevant context pollution.
+
+4. **Fire-and-forget storage**: Memory storage happens after synthesis and doesn't block the main workflow.
+
+---
+
+## Trade-offs and Future Improvements
+
+### Current Trade-offs
+
+| Decision | Trade-off | Mitigation |
+| ---------- | ----------- | ------------ |
+| **InMemorySaver for dev** | State lost on restart | SQLite for production |
+| **Stdio MCP transport** | Single-process only | HTTP transport for distributed deployment |
+| **Sequential LLM calls in fact-checking** | Slower than parallel | Acceptable for accuracy; parallel in future |
+| **Fixed source scoring weights** | May not fit all domains | User-configurable weights planned |
+| **Single loop-back iteration** | May miss deep issues | Capped to prevent infinite loops; user can "dig deeper" |
+
+### What I'd Change in Production
+
+1. **Distributed MCP servers**: Use HTTP transport with load balancing for high availability and horizontal scaling.
+
+2. **Redis-backed checkpointing**: For multi-instance deployments where InMemorySaver won't work.
+
+3. **Streaming LLM responses**: Stream partial results to the frontend for better perceived latency.
+
+4. **Async fact-checking**: Verify claims in parallel batches rather than sequentially.
+
+5. **ML-based source scoring**: Train a classifier on human-rated sources rather than hand-tuned heuristics.
+
+6. **A/B testing framework**: Compare different planner prompts or scoring weights on evaluation metrics.
+
+7. **Cost tracking**: Per-query token usage tracking with budget limits.
+
+8. **Rate limiting at API layer**: Protect against abuse with per-user rate limits.
+
+### Known Limitations
+
+1. **Tavily free tier**: 1,000 searches/month limits sustained usage. Production would need paid tier or search API rotation.
+
+2. **Context window limits**: Very long research sessions may exceed Claude's context window. Would need summarization or chunking.
+
+3. **No image/PDF support**: Currently text-only. Future: add document parsing MCP server.
+
+4. **Single-language**: English only. Future: multilingual research capabilities.
+
+---
+
+## Related Documentation
+
+- [Architecture](architecture.md) - System diagrams and data flow
+- [Setup Guide](setup.md) - Installation and configuration
