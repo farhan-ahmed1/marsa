@@ -19,38 +19,50 @@ Complex research questions often require synthesizing information from multiple 
 ## Architecture
 
 ```mermaid
-graph TB
-    subgraph Frontend["Next.js Frontend"]
-        UI[Query UI]
-        Trace[Agent Trace]
-        Report[Report View]
+flowchart LR
+    classDef frontendNode fill:#ddd6fe,stroke:#555,stroke-width:2px,color:#1a1a1a
+    classDef agentNode fill:#bfdbfe,stroke:#555,stroke-width:2px,color:#1a1a1a
+    classDef mcpNode fill:#fde68a,stroke:#555,stroke-width:2px,color:#1a1a1a
+
+    subgraph FE["Next.js Frontend"]
+        UI["Query Input"]
+        Trace["Agent Trace"]
+        Report["Report View"]
     end
 
-    subgraph Backend["FastAPI Backend"]
-        subgraph Graph["LangGraph Workflow"]
-            P[Planner]
-            R[Researcher]
-            FC[Fact-Checker]
-            S[Synthesizer]
-        end
-        
-        subgraph MCP["MCP Servers"]
-            Tavily[Tavily Search]
-            ChromaDB[Document Store]
-        end
+    subgraph WF["LangGraph Workflow"]
+        P["Planner"]
+        R["Researcher"]
+        FC["Fact-Checker"]
+        SY["Synthesizer"]
     end
-    
-    UI -->|SSE Stream| Graph
-    P --> R
-    R --> FC
-    FC -->|Loop if issues| R
-    FC --> S
-    S --> Report
-    R <--> MCP
-    FC <--> MCP
-    
-    style Graph fill:#e1f5fe
-    style MCP fill:#fff3e0
+
+    subgraph MCP["MCP Servers"]
+        TV["Tavily Search"]
+        CD["Document Store"]
+    end
+
+    UI -->|"POST /research"| P
+    P -->|"sub-queries"| R
+    R -->|"claims"| FC
+    FC -->|"re-research"| R
+    FC -->|"verified claims"| SY
+    SY -->|"final report"| Report
+    UI -.->|"SSE stream"| Trace
+    R <-->|"web search"| TV
+    R <-->|"doc retrieve"| CD
+    FC <-->|"web verify"| TV
+    FC <-->|"doc verify"| CD
+
+    class UI,Trace,Report frontendNode
+    class P,R,FC,SY agentNode
+    class TV,CD mcpNode
+
+    linkStyle default stroke-width:2px,stroke:#555
+
+    style FE fill:#f5f3ff,stroke:#888,stroke-width:1.5px,color:#1a1a1a
+    style WF fill:#eff6ff,stroke:#888,stroke-width:1.5px,color:#1a1a1a
+    style MCP fill:#fefce8,stroke:#888,stroke-width:1.5px,color:#1a1a1a
 ```
 
 **Data Flow:** Query &rarr; Planner &rarr; Researcher(s) &rarr; Fact-Checker &rarr; Synthesizer &rarr; Report
