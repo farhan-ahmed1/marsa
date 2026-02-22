@@ -47,3 +47,6 @@ docs/PRD.md
 .github/skills
 .github/copilot-instructions.md
 
+# testing
+.coverage
+
