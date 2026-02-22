@@ -45,6 +45,16 @@ class Config:
         # Application settings
         self.environment = os.getenv("ENVIRONMENT", "development")
         self.debug = os.getenv("DEBUG", "false").lower() == "true"
+        self.log_level = os.getenv("LOG_LEVEL", "INFO")
+
+        # API key auth (empty = disabled)
+        self.marsa_api_key = os.getenv("MARSA_API_KEY", "")
+
+        # CORS extra origins (comma-separated)
+        self.cors_allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+
+        # Cache settings
+        self.cache_ttl_seconds = int(os.getenv("CACHE_TTL_SECONDS", "3600"))
 
     def _get_required(self, key: str, validate: bool = True) -> str:
         """Get a required environment variable or raise an error.

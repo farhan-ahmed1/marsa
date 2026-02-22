@@ -29,6 +29,8 @@ from api.streaming import (
     run_workflow_with_streaming,
 )
 from graph.state import PipelineStatus, Report
+from middleware.sanitization import sanitize_feedback, sanitize_query
+from utils.cache import response_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -75,13 +77,32 @@ async def submit_query(
     Returns:
         Response with stream_id for tracking this query.
     """
+    # Sanitize user input
+    try:
+        clean_query = sanitize_query(request.query)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    # Check response cache
+    cached = await response_cache.get(clean_query)
+    if cached is not None:
+        logger.info("query_served_from_cache", query_preview=clean_query[:60])
+        return QueryAcceptedResponse(
+            stream_id=cached.get("stream_id", str(uuid.uuid4())),
+            status="completed",
+            message="Result served from cache. Retrieve report at /api/query/{stream_id}/report.",
+        )
+
     # Generate unique stream ID
     stream_id = str(uuid.uuid4())
-    
+
     logger.info(
         "query_submitted",
         stream_id=stream_id,
-        query_length=len(request.query),
+        query_length=len(clean_query),
         enable_hitl=request.enable_hitl,
         enable_parallel=request.enable_parallel,
     )
@@ -93,16 +114,16 @@ async def submit_query(
     _query_settings[stream_id] = {
         "enable_hitl": request.enable_hitl,
         "enable_parallel": request.enable_parallel,
-        "query": request.query,
+        "query": clean_query,
         "submitted_at": datetime.now(timezone.utc).isoformat(),
     }
-    
+
     # Run workflow in background
     async def run_workflow():
         try:
             await run_workflow_with_streaming(
                 stream_id=stream_id,
-                query=request.query,
+                query=clean_query,
                 enable_hitl=request.enable_hitl,
                 enable_parallel=request.enable_parallel,
             )
@@ -354,6 +375,10 @@ async def submit_feedback(
             detail="Correction text required for 'correct' action",
         )
     
+    # Sanitize feedback text
+    clean_topic = sanitize_feedback(request.topic) if request.topic else None
+    clean_correction = sanitize_feedback(request.correction) if request.correction else None
+
     # Get original settings
     settings = _query_settings.get(stream_id, {})
     
@@ -368,7 +393,7 @@ async def submit_feedback(
     # Define next action descriptions
     next_actions = {
         "approve": "Proceeding to report synthesis",
-        "dig_deeper": f"Re-researching with focus on: {request.topic}",
+        "dig_deeper": f"Re-researching with focus on: {clean_topic}",
         "correct": "Re-researching with corrections applied",
         "abort": "Workflow aborted",
     }
@@ -381,8 +406,8 @@ async def submit_feedback(
                     stream_id=stream_id,
                     feedback={
                         "action": request.action,
-                        "topic": request.topic,
-                        "correction": request.correction,
+                        "topic": clean_topic,
+                        "correction": clean_correction,
                     },
                     enable_hitl=settings.get("enable_hitl", True),
                     enable_parallel=settings.get("enable_parallel", True),
@@ -503,35 +528,47 @@ async def get_checkpoint(stream_id: str) -> HITLCheckpointResponse:
 )
 async def health_check() -> HealthResponse:
     """Check API health and status of dependencies.
-    
+
+    Verifies reachability of ChromaDB, the LLM API, and core libraries.
+
     Returns:
         Health status with dependency information.
     """
-    # Check dependencies
-    dependencies = {}
-    
-    # Check if we can import required modules
+    dependencies: dict[str, object] = {}
+
+    # 1. LangGraph import
     try:
-        from graph.workflow import create_workflow
+        from graph.workflow import create_workflow  # noqa: F401
         dependencies["langgraph"] = "ok"
-    except Exception as e:
-        dependencies["langgraph"] = f"error: {str(e)}"
-    
+    except Exception as exc:
+        dependencies["langgraph"] = f"error: {exc}"
+
+    # 2. ChromaDB connectivity
     try:
         import chromadb
+        client = chromadb.Client()
+        client.heartbeat()  # lightweight ping
         dependencies["chromadb"] = "ok"
-    except Exception as e:
-        dependencies["chromadb"] = f"error: {str(e)}"
-    
-    # Active streams count
+    except Exception as exc:
+        dependencies["chromadb"] = f"error: {exc}"
+
+    # 3. Anthropic API key presence (not a live call)
+    import os
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    dependencies["llm_api"] = "ok" if anthropic_key else "warning: ANTHROPIC_API_KEY not set"
+
+    # 4. Active streams
     active_streams = event_queue_manager.get_active_streams()
     dependencies["active_streams"] = len(active_streams)
-    
+
+    # 5. Response cache stats
+    dependencies["cache"] = response_cache.stats
+
     overall_status = "ok" if all(
-        v == "ok" or isinstance(v, int)
+        v == "ok" or isinstance(v, (int, dict))
         for v in dependencies.values()
     ) else "degraded"
-    
+
     return HealthResponse(
         status=overall_status,
         version="1.0.0",

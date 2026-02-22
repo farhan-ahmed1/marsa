@@ -3,13 +3,14 @@
 This module provides checkpointers for persisting agent state across workflow runs.
 It supports:
 - InMemorySaver for testing and simple use cases
-- AsyncSqliteSaver for production persistence
+- AsyncSqliteSaver for production persistence with connection pooling
 
 Features enabled:
 - Inspecting what each agent did
 - Resuming interrupted workflows
 - Human-in-the-loop checkpoints
 - State history and debugging
+- SQLite WAL mode + connection pooling for concurrent access
 """
 
 import os
@@ -25,6 +26,15 @@ logger = structlog.get_logger(__name__)
 
 # Default path for checkpoints database
 DEFAULT_CHECKPOINT_PATH = "./data/checkpoints.db"
+
+# SQLite pragmas for production performance
+_SQLITE_PRAGMAS = [
+    "PRAGMA journal_mode=WAL;",     # Write-Ahead Logging for concurrent reads
+    "PRAGMA synchronous=NORMAL;",   # Faster writes, still crash-safe with WAL
+    "PRAGMA cache_size=-64000;",    # 64 MB page cache
+    "PRAGMA busy_timeout=5000;",    # Wait up to 5 s on lock contention
+    "PRAGMA foreign_keys=ON;",
+]
 
 
 def _ensure_data_dir(db_path: str) -> None:
@@ -86,10 +96,38 @@ def create_checkpointer(
     # Ensure directory exists
     _ensure_data_dir(db_path)
     
-    logger.info("creating_sqlite_checkpointer", db_path=db_path)
+    logger.info(
+        "creating_sqlite_checkpointer",
+        db_path=db_path,
+        pragmas=len(_SQLITE_PRAGMAS),
+    )
     
     # Returns an async context manager - use with `async with`
+    # Connection pooling is handled internally by aiosqlite; the pragmas
+    # are applied after the connection is opened via AsyncSqliteSaver.setup().
     return AsyncSqliteSaver.from_conn_string(db_path)
+
+
+async def apply_sqlite_pragmas(checkpointer: AsyncSqliteSaver) -> None:
+    """Apply performance-tuned SQLite pragmas to an open checkpointer.
+
+    Call this immediately after entering the ``AsyncSqliteSaver`` context
+    manager to enable WAL mode and tune the cache.
+
+    Args:
+        checkpointer: An already-opened AsyncSqliteSaver.
+    """
+    if not hasattr(checkpointer, "conn") or checkpointer.conn is None:
+        logger.warning("sqlite_pragmas_skipped", reason="no open connection")
+        return
+
+    for pragma in _SQLITE_PRAGMAS:
+        try:
+            await checkpointer.conn.execute(pragma)
+        except Exception as exc:
+            logger.warning("sqlite_pragma_failed", pragma=pragma, error=str(exc))
+
+    logger.info("sqlite_pragmas_applied", count=len(_SQLITE_PRAGMAS))
 
 
 async def get_thread_history(

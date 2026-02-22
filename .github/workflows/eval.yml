@@ -1,0 +1,128 @@
+name: Weekly Evaluation
+
+on:
+  schedule:
+    # Run every Sunday at 02:00 UTC
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      category:
+        description: "Evaluation category (leave empty for all)"
+        required: false
+        type: string
+      limit:
+        description: "Max queries to run (0 = all)"
+        required: false
+        default: "0"
+        type: string
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  PYTHONPATH: backend
+
+jobs:
+  run-evaluation:
+    name: Run Evaluation Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-eval-${{ runner.os }}-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: pip-eval-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run evaluation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: |
+          cd backend
+          ARGS=""
+          if [ -n "${{ inputs.category }}" ]; then
+            ARGS="$ARGS --category ${{ inputs.category }}"
+          fi
+          if [ "${{ inputs.limit }}" != "0" ] && [ -n "${{ inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ inputs.limit }}"
+          fi
+          python eval/run_eval.py $ARGS || true
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: backend/data/eval_results/
+          retention-days: 90
+
+      - name: Create issue with results
+        if: github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const glob = require('@actions/glob');
+
+            // Find the most recent eval results file
+            const resultsDir = 'backend/data/eval_results';
+            let summary = 'No evaluation results file found.';
+
+            try {
+              const files = fs.readdirSync(resultsDir)
+                .filter(f => f.endsWith('.json'))
+                .sort()
+                .reverse();
+
+              if (files.length > 0) {
+                const data = JSON.parse(
+                  fs.readFileSync(`${resultsDir}/${files[0]}`, 'utf-8')
+                );
+                const metrics = data.summary || data;
+                summary = [
+                  `## Evaluation Results - ${new Date().toISOString().split('T')[0]}`,
+                  '',
+                  `| Metric | Value |`,
+                  `|--------|-------|`,
+                  `| Queries Run | ${metrics.total_queries || 'N/A'} |`,
+                  `| Avg Latency | ${metrics.avg_latency_s ? metrics.avg_latency_s.toFixed(1) + 's' : 'N/A'} |`,
+                  `| P95 Latency | ${metrics.p95_latency_s ? metrics.p95_latency_s.toFixed(1) + 's' : 'N/A'} |`,
+                  `| Avg Quality | ${metrics.avg_quality_score ? metrics.avg_quality_score.toFixed(2) + '/5' : 'N/A'} |`,
+                  `| Citation Accuracy | ${metrics.citation_accuracy ? (metrics.citation_accuracy * 100).toFixed(0) + '%' : 'N/A'} |`,
+                  `| Fact-Check Recall | ${metrics.fact_check_recall ? (metrics.fact_check_recall * 100).toFixed(0) + '%' : 'N/A'} |`,
+                  '',
+                  `Full results in artifact: eval-results-${context.runId}`,
+                ].join('\n');
+              }
+            } catch (e) {
+              summary += `\n\nError reading results: ${e.message}`;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Eval Results: ${new Date().toISOString().split('T')[0]}`,
+              body: summary,
+              labels: ['evaluation', 'automated'],
+            });
