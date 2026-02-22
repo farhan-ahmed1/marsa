@@ -73,4 +73,22 @@ docker\:build:
 
 # Run the evaluation suite against the live pipeline
 eval:
-	.venv/bin/python backend/eval/run_eval.py
+	cd backend && ../.venv/bin/python eval/run_eval.py
+
+# Run evaluation on a subset (quick test)
+eval\:quick:
+	cd backend && ../.venv/bin/python eval/run_eval.py --limit 3
+
+# Dry run - preview queries without executing
+eval\:dry-run:
+	cd backend && ../.venv/bin/python eval/run_eval.py --dry-run
+
+# Run evaluation for a specific category
+eval\:factual:
+	cd backend && ../.venv/bin/python eval/run_eval.py --category factual
+
+eval\:comparison:
+	cd backend && ../.venv/bin/python eval/run_eval.py --category comparison
+
+eval\:false-premise:
+	cd backend && ../.venv/bin/python eval/run_eval.py --category false_premise

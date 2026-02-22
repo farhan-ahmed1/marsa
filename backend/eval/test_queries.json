@@ -1,0 +1,227 @@
+{
+  "version": "1.0.0",
+  "description": "MARSA evaluation query set for testing the multi-agent research pipeline",
+  "queries": [
+    {
+      "id": "factual_01",
+      "query": "What is the CAP theorem in distributed systems?",
+      "category": "factual",
+      "expected_sub_queries_min": 1,
+      "expected_sources_min": 3,
+      "must_mention": ["consistency", "availability", "partition tolerance"],
+      "must_not_claim": [],
+      "difficulty": "easy"
+    },
+    {
+      "id": "factual_02",
+      "query": "Who created the Python programming language and when?",
+      "category": "factual",
+      "expected_sub_queries_min": 1,
+      "expected_sources_min": 2,
+      "must_mention": ["Guido van Rossum"],
+      "must_not_claim": ["Python was created in 2000"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "factual_03",
+      "query": "What is gRPC and what problem does it solve?",
+      "category": "factual",
+      "expected_sub_queries_min": 1,
+      "expected_sources_min": 3,
+      "must_mention": ["RPC", "protocol buffers", "HTTP/2"],
+      "must_not_claim": [],
+      "difficulty": "easy"
+    },
+    {
+      "id": "factual_04",
+      "query": "What are the SOLID principles in software engineering?",
+      "category": "factual",
+      "expected_sub_queries_min": 1,
+      "expected_sources_min": 3,
+      "must_mention": ["single responsibility", "open-closed", "interface segregation"],
+      "must_not_claim": [],
+      "difficulty": "easy"
+    },
+    {
+      "id": "factual_05",
+      "query": "What is WebAssembly and why was it created?",
+      "category": "factual",
+      "expected_sub_queries_min": 1,
+      "expected_sources_min": 3,
+      "must_mention": ["browser", "performance", "binary"],
+      "must_not_claim": [],
+      "difficulty": "easy"
+    },
+    {
+      "id": "comparison_01",
+      "query": "Compare Rust vs Go for building microservices",
+      "category": "comparison",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["performance", "concurrency", "memory safety"],
+      "must_not_claim": ["Go is faster than Rust in all cases", "Rust has garbage collection"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "comparison_02",
+      "query": "Compare React, Vue, and Svelte for building single-page applications",
+      "category": "comparison",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["virtual DOM", "reactivity", "bundle size"],
+      "must_not_claim": [],
+      "difficulty": "medium"
+    },
+    {
+      "id": "comparison_03",
+      "query": "Compare PostgreSQL vs MongoDB for a content management system",
+      "category": "comparison",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["schema", "scalability", "queries"],
+      "must_not_claim": ["MongoDB is always faster than PostgreSQL"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "comparison_04",
+      "query": "Compare Kubernetes vs Docker Swarm for container orchestration",
+      "category": "comparison",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["scaling", "complexity", "ecosystem"],
+      "must_not_claim": [],
+      "difficulty": "medium"
+    },
+    {
+      "id": "comparison_05",
+      "query": "Compare GraphQL vs REST for API design",
+      "category": "comparison",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["overfetching", "schema", "caching"],
+      "must_not_claim": ["GraphQL replaces REST entirely"],
+      "difficulty": "medium"
+    },
+    {
+      "id": "exploratory_01",
+      "query": "What are the latest trends in AI agent frameworks for 2025-2026?",
+      "category": "exploratory",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["LangChain", "agents", "tools"],
+      "must_not_claim": [],
+      "difficulty": "hard"
+    },
+    {
+      "id": "exploratory_02",
+      "query": "What are best practices for securing containerized applications in production?",
+      "category": "exploratory",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["image scanning", "secrets", "network policies"],
+      "must_not_claim": [],
+      "difficulty": "hard"
+    },
+    {
+      "id": "exploratory_03",
+      "query": "How do large-scale distributed systems handle data consistency?",
+      "category": "exploratory",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["eventual consistency", "consensus", "replication"],
+      "must_not_claim": [],
+      "difficulty": "hard"
+    },
+    {
+      "id": "exploratory_04",
+      "query": "What approaches exist for implementing real-time collaborative editing?",
+      "category": "exploratory",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["CRDT", "operational transformation"],
+      "must_not_claim": [],
+      "difficulty": "hard"
+    },
+    {
+      "id": "exploratory_05",
+      "query": "What are emerging patterns for building LLM-powered applications?",
+      "category": "exploratory",
+      "expected_sub_queries_min": 3,
+      "expected_sources_min": 5,
+      "must_mention": ["RAG", "agents", "prompting"],
+      "must_not_claim": [],
+      "difficulty": "hard"
+    },
+    {
+      "id": "false_premise_01",
+      "query": "Why was Go released in 2015 and how has it evolved since then?",
+      "category": "false_premise",
+      "expected_sub_queries_min": 2,
+      "expected_sources_min": 3,
+      "must_mention": ["2009"],
+      "must_not_claim": ["Go was released in 2015"],
+      "false_claim": "Go was released in 2015",
+      "correct_fact": "Go was released in 2009",
+      "difficulty": "medium"
+    },
+    {
+      "id": "false_premise_02",
+      "query": "Explain why JavaScript was invented by Microsoft for Internet Explorer",
+      "category": "false_premise",
+      "expected_sub_queries_min": 2,
+      "expected_sources_min": 3,
+      "must_mention": ["Brendan Eich", "Netscape"],
+      "must_not_claim": ["JavaScript was invented by Microsoft"],
+      "false_claim": "JavaScript was invented by Microsoft for Internet Explorer",
+      "correct_fact": "JavaScript was created by Brendan Eich at Netscape in 1995",
+      "difficulty": "medium"
+    },
+    {
+      "id": "false_premise_03",
+      "query": "How did Linus Torvalds create Python and what inspired its design?",
+      "category": "false_premise",
+      "expected_sub_queries_min": 2,
+      "expected_sources_min": 3,
+      "must_mention": ["Guido van Rossum"],
+      "must_not_claim": ["Linus Torvalds created Python"],
+      "false_claim": "Linus Torvalds created Python",
+      "correct_fact": "Python was created by Guido van Rossum; Linus Torvalds created Linux",
+      "difficulty": "medium"
+    },
+    {
+      "id": "doc_context_01",
+      "query": "Based on the ingested documentation, what are the key architectural patterns discussed?",
+      "category": "doc_context",
+      "expected_sub_queries_min": 2,
+      "expected_sources_min": 2,
+      "must_mention": [],
+      "must_not_claim": [],
+      "requires_doc_store": true,
+      "difficulty": "medium"
+    },
+    {
+      "id": "doc_context_02",
+      "query": "What programming language concepts are covered in the document store?",
+      "category": "doc_context",
+      "expected_sub_queries_min": 2,
+      "expected_sources_min": 2,
+      "must_mention": [],
+      "must_not_claim": [],
+      "requires_doc_store": true,
+      "difficulty": "medium"
+    }
+  ],
+  "category_weights": {
+    "factual": 1.0,
+    "comparison": 1.5,
+    "exploratory": 2.0,
+    "false_premise": 2.5,
+    "doc_context": 1.5
+  },
+  "scoring_criteria": {
+    "relevance": "How well does the report address the original query?",
+    "accuracy": "Are the claims in the report factually correct?",
+    "completeness": "Does the report cover all important aspects?",
+    "citation_quality": "Are sources properly cited and high-quality?"
+  }
+}
