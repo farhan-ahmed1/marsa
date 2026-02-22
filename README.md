@@ -10,13 +10,9 @@
 <!-- TODO: Add demo GIF here once recorded -->
 <!-- ![MARSA Demo](docs/assets/demo.gif) -->
 
----
-
 ## What is MARSA?
 
 Complex research questions often require synthesizing information from multiple sources, verifying claims against independent evidence, and presenting findings with proper citations. MARSA automates this workflow using a team of specialized AI agents - each focused on one aspect of research - orchestrated through LangGraph's state machine architecture. Unlike typical RAG chatbots, MARSA provides transparent agent activity tracking, source quality scoring, and human-in-the-loop checkpoints for critical research decisions.
-
----
 
 ## Architecture
 
@@ -59,8 +55,6 @@ graph TB
 
 For detailed architecture diagrams including LangGraph workflow and MCP interactions, see [docs/architecture.md](docs/architecture.md).
 
----
-
 ## Features
 
 - **Multi-Agent Orchestration**: Four specialized agents (Planner, Researcher, Fact-Checker, Synthesizer) collaborate through a LangGraph state machine
@@ -71,8 +65,6 @@ For detailed architecture diagrams including LangGraph workflow and MCP interact
 - **Cross-Session Memory**: Prior research context is retrieved for related follow-up queries
 - **Real-Time Observability**: SSE-streamed agent trace with timeline visualization in the UI
 - **MCP-Based Data Access**: Clean separation between agents and data sources via Model Context Protocol
-
----
 
 ## Quick Start
 
@@ -93,8 +85,6 @@ make dev  # Starts both backend and frontend
 ```
 
 For detailed setup instructions including Docker deployment, see [docs/setup.md](docs/setup.md).
-
----
 
 ## Evaluation Results
 
@@ -124,8 +114,6 @@ Evaluation run on 20 test queries across 5 categories (factual, comparison, expl
 
 Run the evaluation suite: `make eval`
 
----
-
 ## Tech Stack
 
 | Layer | Technology | Purpose |
@@ -140,8 +128,6 @@ Run the evaluation suite: `make eval`
 | Frontend | Next.js + Tailwind + shadcn/ui | Real-time UI with agent trace |
 | State Persistence | SQLite | LangGraph checkpointer |
 | Observability | LangSmith | Tracing and debugging |
-
----
 
 ## Project Structure
 
@@ -171,8 +157,6 @@ marsa/
 └── docker-compose.yml       # Container orchestration
 ```
 
----
-
 ## Development Commands
 
 | Command | Description |
@@ -186,8 +170,6 @@ marsa/
 | `make eval` | Run full evaluation suite |
 | `make eval:quick` | Run quick evaluation (3 queries) |
 
----
-
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -199,38 +181,12 @@ marsa/
 | `LANGCHAIN_API_KEY` | No | LangSmith API key (if tracing enabled) |
 | `LOG_LEVEL` | No | Logging level (default: `INFO`) |
 
----
-
 ## Documentation
 
 - [Architecture](docs/architecture.md) - System diagrams, LangGraph workflow, data flow
 - [Design Decisions](docs/design-decisions.md) - Rationale for technical choices
 - [Setup Guide](docs/setup.md) - Detailed installation and troubleshooting
 
----
-
-## Contributing
-
-Contributions are welcome. Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-Run `make lint` and `make test` before submitting.
-
----
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## Acknowledgments
-
-- [Anthropic](https://anthropic.com/) for Claude and the Model Context Protocol
-- [LangGraph](https://github.com/langchain-ai/langgraph) for the agent orchestration framework
-- [Tavily](https://tavily.com/) for the AI-focused search API
