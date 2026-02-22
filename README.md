@@ -9,7 +9,7 @@
 
 **Multi-Agent ReSearch Assistant** - A production-grade multi-agent system that orchestrates specialized AI agents via LangGraph with MCP-connected data sources to produce well-sourced, fact-checked research reports.
 
-<!-- TODO: Add demo GIF here once recorded -->
+<!-- Demo GIF placeholder: record with OBS Studio, convert with gifski -->
 <!-- ![MARSA Demo](docs/assets/demo.gif) -->
 
 ## What is MARSA?
@@ -122,7 +122,7 @@ Evaluation run on 20 test queries across 5 categories (factual, comparison, expl
 | Comparison | 5 | 4.01/5 | 9.7s |
 | Exploratory | 5 | 3.30/5 | 10.3s |
 | Doc Context | 2 | 3.58/5 | 10.1s |
-| False Premise | 3 | 3.57/5 | 10.0s |
+| False Premise | 3 | 3.13/5 | 10.3s |
 
 </details>
 
@@ -195,11 +195,22 @@ marsa/
 | `LANGCHAIN_API_KEY` | No | LangSmith API key (if tracing enabled) |
 | `LOG_LEVEL` | No | Logging level (default: `INFO`) |
 
+## Future Work
+
+- **Swap SQLite for Postgres** for production-scale state persistence and concurrent access
+- **Add multi-model support** (Claude, GPT-4, Gemini) with automatic fallback for reliability
+- **Implement streaming report generation** so users see the report build in real-time, paragraph by paragraph
+- **Add a feedback loop** where human corrections during HITL checkpoints improve future responses via fine-tuning or prompt adaptation
+- **Scale MCP servers independently** behind a service mesh for horizontal scaling under heavy query load
+- **Add semantic caching** with embedding similarity to serve near-duplicate queries without re-running the full pipeline
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) - System diagrams, LangGraph workflow, data flow
 - [Design Decisions](docs/design-decisions.md) - Rationale for technical choices
 - [Setup Guide](docs/setup.md) - Detailed installation and troubleshooting
+- [Changelog](CHANGELOG.md) - Version history and release notes
+- [Resume Bullets](docs/resume-bullets.md) - Quantified project metrics for resumes
 
 ## License
 
