@@ -30,9 +30,16 @@ jobs:
         ruff check backend --output-format=github
       continue-on-error: true
     
-    - name: Test with pytest (collect-only for now)
+    - name: Test with pytest
       run: |
-        pytest backend/tests --collect-only
+        pytest backend/tests --cov=backend --cov-report=xml --ignore=backend/tests/integration
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.xml
+        fail_ci_if_error: false
     
   frontend-tests:
     name: Frontend Lint & Build

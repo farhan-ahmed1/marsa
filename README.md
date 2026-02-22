@@ -1,9 +1,11 @@
 # MARSA
 
 [![CI Pipeline](https://github.com/farhan-ahmed1/marsa/actions/workflows/ci.yml/badge.svg)](https://github.com/farhan-ahmed1/marsa/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/farhan-ahmed1/marsa/graph/badge.svg)](https://codecov.io/gh/farhan-ahmed1/marsa)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1C3C59)](https://github.com/langchain-ai/langgraph)
+[![Claude](https://img.shields.io/badge/powered%20by-Claude-D97757)](https://www.anthropic.com/claude)
 
 **Multi-Agent ReSearch Assistant** - A production-grade multi-agent system that orchestrates specialized AI agents via LangGraph with MCP-connected data sources to produce well-sourced, fact-checked research reports.
 
