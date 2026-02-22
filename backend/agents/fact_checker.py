@@ -44,8 +44,11 @@ logger = structlog.get_logger(__name__)
 # Maximum iterations to prevent infinite loops
 MAX_ITERATIONS = 2
 
-# Threshold for bad claims that triggers re-research (30%)
-BAD_CLAIM_THRESHOLD = 0.3
+# Threshold for bad claims that triggers re-research (40%)
+# Raised from 0.3 to reduce false-positive re-research loops.
+# Unverifiable claims are common for recent or niche topics and
+# should not automatically trigger expensive re-research.
+BAD_CLAIM_THRESHOLD = 0.4
 
 
 VERIFICATION_QUERY_SYSTEM_PROMPT = """\
@@ -87,6 +90,15 @@ information that directly contradicts the claim.
 **UNVERIFIABLE**: The search results do not contain enough information to \
 confirm or deny the claim. The topic may be covered, but the specific claim \
 cannot be verified.
+
+IMPORTANT: Only mark a claim as CONTRADICTED if sources explicitly and \
+directly refute it. Absence of evidence is NOT contradiction. If you cannot \
+find evidence for or against a claim, mark it UNVERIFIABLE, not CONTRADICTED.
+
+Be especially careful with:
+- Recent claims (data may not be indexed yet)
+- Niche technical claims (limited sources)
+- Statistical claims (minor differences in numbers do not equal contradiction)
 
 ## Confidence Scoring
 
@@ -442,10 +454,12 @@ def should_loop_back(state: AgentState) -> str:
         logger.warning("should_loop_back_no_results")
         return "synthesizer"
     
-    # Count bad (non-supported) claims
+    # Count truly bad claims (contradicted only, not unverifiable)
+    # Unverifiable claims are expected for niche/recent topics and should
+    # not trigger expensive re-research loops.
     bad_count = sum(
         1 for r in results 
-        if r.verdict != VerificationVerdict.SUPPORTED
+        if r.verdict == VerificationVerdict.CONTRADICTED
     )
     bad_ratio = bad_count / len(results)
     

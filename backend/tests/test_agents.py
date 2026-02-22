@@ -1339,18 +1339,15 @@ class TestShouldLoopBack:
         
         assert should_loop_back(state) == "synthesizer"
     
-    def test_over_30_percent_bad_loops_back(self):
-        """Test that >30% bad claims triggers loop back."""
-        # 4 out of 10 = 40% bad claims
+    def test_over_threshold_contradicted_loops_back(self):
+        """Test that >40% contradicted claims triggers loop back."""
+        # 5 out of 10 = 50% contradicted claims (only contradicted counts as bad now)
         results = [
             self._create_result(VerificationVerdict.SUPPORTED)
-            for _ in range(6)
+            for _ in range(5)
         ] + [
             self._create_result(VerificationVerdict.CONTRADICTED)
-            for _ in range(2)
-        ] + [
-            self._create_result(VerificationVerdict.UNVERIFIABLE)
-            for _ in range(2)
+            for _ in range(5)
         ]
         
         state = {
@@ -1360,15 +1357,33 @@ class TestShouldLoopBack:
         
         assert should_loop_back(state) == "researcher"
     
-    def test_exactly_30_percent_proceeds_to_synthesizer(self):
-        """Test that exactly 30% bad claims proceeds to synthesizer."""
-        # 3 out of 10 = exactly 30% bad claims (not over threshold)
+    def test_unverifiable_does_not_count_as_bad(self):
+        """Test that unverifiable claims do NOT trigger loop back."""
+        # 6 supported + 4 unverifiable = 0% contradicted (below threshold)
         results = [
             self._create_result(VerificationVerdict.SUPPORTED)
-            for _ in range(7)
+            for _ in range(6)
+        ] + [
+            self._create_result(VerificationVerdict.UNVERIFIABLE)
+            for _ in range(4)
+        ]
+        
+        state = {
+            "verification_results": results,
+            "iteration_count": 0,
+        }
+        
+        assert should_loop_back(state) == "synthesizer"
+    
+    def test_exactly_40_percent_proceeds_to_synthesizer(self):
+        """Test that exactly 40% contradicted claims proceeds to synthesizer."""
+        # 4 out of 10 = exactly 40% contradicted (not over threshold)
+        results = [
+            self._create_result(VerificationVerdict.SUPPORTED)
+            for _ in range(6)
         ] + [
             self._create_result(VerificationVerdict.CONTRADICTED)
-            for _ in range(3)
+            for _ in range(4)
         ]
         
         state = {
@@ -1404,8 +1419,9 @@ class TestShouldLoopBack:
     
     def test_iteration_count_below_max_allows_loop_back(self):
         """Test that iteration count below max allows loop back."""
+        # All contradicted to exceed threshold
         results = [
-            self._create_result(VerificationVerdict.UNVERIFIABLE)
+            self._create_result(VerificationVerdict.CONTRADICTED)
             for _ in range(10)
         ]
         
@@ -1730,9 +1746,9 @@ class TestFactCheckNode:
 class TestFactCheckerConstants:
     """Tests for fact-checker constants and thresholds."""
     
-    def test_bad_claim_threshold_is_30_percent(self):
-        """Test that bad claim threshold is 0.3 (30%)."""
-        assert BAD_CLAIM_THRESHOLD == 0.3
+    def test_bad_claim_threshold_is_40_percent(self):
+        """Test that bad claim threshold is 0.4 (40%)."""
+        assert BAD_CLAIM_THRESHOLD == 0.4
     
     def test_max_iterations_is_2(self):
         """Test that max iterations is 2."""

@@ -59,18 +59,22 @@ Generate a JSON report with:
 ## Writing Guidelines
 
 1. **Organization**: Group related findings into logical sections with clear headings
-2. **Citations**: Use numbered inline citations like [1], [2] to reference sources
+2. **Citations**: Use numbered inline citations like [1], [2] to reference sources. EVERY factual claim MUST have at least one citation. Aim for 1-3 citations per paragraph.
 3. **Objectivity**: Present findings objectively, distinguish facts from opinions
 4. **Uncertainty**: Flag areas of uncertainty or conflicting information clearly
 5. **Prioritization**: Emphasize claims backed by high-quality sources (score >= 0.7)
 6. **Completeness**: Address all aspects of the original query
+7. **Depth**: Each section should contain 2-4 substantive paragraphs (100-200 words per section minimum). Do NOT write single-sentence sections.
+8. **Report Length**: The full report should be 500-1500 words depending on query complexity. Comparison and exploratory queries need the longer end; simple factual queries can be shorter.
 
 ## Citation Format
 
 - Use [N] format for inline citations where N is the citation number
 - Each unique source gets a single citation number
 - Place citations immediately after the relevant claim
+- EVERY factual statement MUST have a citation. Uncited claims reduce report quality.
 - Example: "Python was created by Guido van Rossum [1] and first released in 1991 [2]."
+- For paragraphs synthesizing multiple sources: "Studies show X [1][3] while others note Y [2][4]."
 
 ## Confidence Summary Guidelines
 

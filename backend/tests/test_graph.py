@@ -200,7 +200,7 @@ class TestWorkflowRouting:
         assert result == "synthesizer"
 
     def test_should_loop_back_high_failure_rate(self):
-        """Test that high failure rate triggers loopback."""
+        """Test that high contradiction rate triggers loopback."""
         from agents.fact_checker import should_loop_back
         
         claim = Claim(
@@ -212,7 +212,7 @@ class TestWorkflowRouting:
             context="",
         )
         
-        # 2 out of 3 claims fail (66% failure rate)
+        # 2 out of 3 claims contradicted (66% > 40% threshold)
         state: AgentState = {
             "verification_results": [
                 VerificationResult(
@@ -226,7 +226,7 @@ class TestWorkflowRouting:
                 ),
                 VerificationResult(
                     claim=claim,
-                    verdict=VerificationVerdict.UNVERIFIABLE,
+                    verdict=VerificationVerdict.CONTRADICTED,
                     confidence=0.5,
                     supporting_sources=[],
                     contradicting_sources=[],

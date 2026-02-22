@@ -52,15 +52,23 @@ Analyze the query and output a JSON plan with these fields:
 - "opinion": Questions seeking analysis or opinions (e.g., "Is Rust worth learning?")
 - "howto": Step-by-step guides (e.g., "How to set up Kubernetes?")
 
+## Sub-Query Decomposition Rules
+
+1. Each sub-query MUST be a specific, standalone search query (not a vague topic)
+2. Include concrete terms, technologies, or metrics to search for
+3. Avoid overly broad sub-queries like "pros and cons" or "overview" - be specific
+4. Each sub-query should be independently searchable and return precise results
+5. Do NOT repeat the original query as a sub-query
+
 ## Sub-Query Decomposition Examples
 
 Query: "Compare Rust vs Go for backend development"
 sub_queries:
-  - "Rust strengths for backend and distributed systems"
-  - "Go strengths for backend and distributed systems"
-  - "Rust vs Go performance benchmarks"
-  - "Rust vs Go developer experience and learning curve"
-  - "Rust vs Go ecosystem and library support"
+  - "Rust ownership model and memory safety for backend web servers"
+  - "Go goroutines concurrency model for backend microservices"
+  - "Rust vs Go HTTP server performance benchmarks throughput latency 2024"
+  - "Rust vs Go compile time and developer productivity comparison"
+  - "Rust crates vs Go standard library for backend web development"
 
 Query: "What is the CAP theorem?"
 sub_queries:
@@ -69,18 +77,18 @@ sub_queries:
 
 Query: "What are the best practices for microservices?"
 sub_queries:
-  - "Microservices architecture patterns and design principles"
-  - "Microservices communication patterns (sync vs async)"
-  - "Microservices data management and consistency"
-  - "Microservices deployment and orchestration"
+  - "Microservices bounded context and domain-driven design patterns"
+  - "Microservices inter-service communication gRPC vs REST vs message queues"
+  - "Microservices database per service pattern and saga pattern for consistency"
+  - "Kubernetes microservices deployment strategies blue-green canary rolling"
 
 Query: "Compare React, Vue, and Svelte for building SPAs"
 sub_queries:
-  - "React strengths and ecosystem for SPAs"
-  - "Vue strengths and ecosystem for SPAs"
-  - "Svelte strengths and ecosystem for SPAs"
-  - "React vs Vue vs Svelte performance comparison"
-  - "React vs Vue vs Svelte developer experience"
+  - "React 18 concurrent rendering and virtual DOM performance for large SPAs"
+  - "Vue 3 composition API and reactivity system for SPA development"
+  - "Svelte compiler approach vs virtual DOM bundle size and runtime performance"
+  - "React vs Vue vs Svelte JavaScript framework benchmark scores 2024"
+  - "React vs Vue vs Svelte TypeScript support tooling and learning curve"
 
 ## Search Strategy Guidelines
 

@@ -70,7 +70,18 @@ class TestHelloServer:
 
 class TestTavilySearchServer:
     """Tests for the Tavily search MCP server."""
-    
+
+    @pytest.fixture(autouse=True)
+    def reset_rate_limiter(self):
+        """Reset the rate limiter before each test to avoid cross-test pollution."""
+        import mcp_servers.tavily_search as ts
+        original_limiter = ts._rate_limiter
+        # Create a fresh rate limiter with high limit for tests
+        from utils.rate_limiter import RateLimiter
+        ts._rate_limiter = RateLimiter(name="tavily_test", monthly_limit=100000)
+        yield
+        ts._rate_limiter = original_limiter
+
     @patch('mcp_servers.tavily_search.get_tavily_client')
     def test_search_returns_results(self, mock_get_client, mock_tavily_response):
         """Test that search returns a list of SearchResult objects (MOCKED)."""
@@ -163,6 +174,34 @@ class TestTavilySearchServer:
         if len(results) > 1:
             # First result should have high relevance
             assert results[0].score > 0.5
+
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_handles_empty_results(self, mock_get_client):
+        """Test search handles empty API response."""
+        mock_client = mock_get_client.return_value
+        mock_client.search.return_value = {"results": []}
+        
+        results = search("very obscure query", max_results=5)
+        assert results == []
+
+    @patch('mcp_servers.tavily_search.get_tavily_client')
+    def test_search_handles_missing_published_date(self, mock_get_client):
+        """Test search handles results without published_date."""
+        mock_client = mock_get_client.return_value
+        mock_client.search.return_value = {
+            "results": [
+                {
+                    "title": "No Date Article",
+                    "url": "https://example.com/nodate",
+                    "content": "Content without date info.",
+                    "score": 0.8,
+                }
+            ]
+        }
+        
+        results = search("test query", max_results=1)
+        assert len(results) == 1
+        assert results[0].published_date is None
 
 
 class TestDocumentStoreServer:
