@@ -43,6 +43,7 @@ dist/
 
 # Misc
 docs/PRD.md
+docs/resume-bullets.md
 .github/instructions
 .github/skills
 .github/copilot-instructions.md

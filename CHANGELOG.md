@@ -11,6 +11,7 @@ Initial release of MARSA (Multi-Agent ReSearch Assistant).
 ### Added
 
 #### Multi-Agent Orchestration
+
 - Four specialized AI agents: Planner, Researcher, Fact-Checker, Synthesizer
 - LangGraph state machine with conditional routing and fact-check loops
 - Parallel sub-query execution using LangGraph's Send API
@@ -18,12 +19,14 @@ Initial release of MARSA (Multi-Agent ReSearch Assistant).
 - SQLite-based state persistence via LangGraph checkpointer
 
 #### MCP Servers
+
 - Tavily web search MCP server with rate limiting and retry logic
 - ChromaDB document store MCP server with OpenAI embeddings (text-embedding-3-small)
 - GitHub MCP server (optional) for repository data access
 - Unified MCP client wrapper for agent-to-server communication
 
 #### Backend (FastAPI)
+
 - Async REST API with SSE streaming for real-time agent trace events
 - Cross-session memory using ChromaDB for context-aware follow-up queries
 - Source quality scoring (domain authority, recency, content depth)
@@ -34,6 +37,7 @@ Initial release of MARSA (Multi-Agent ReSearch Assistant).
 - Resilience utilities with exponential backoff retry logic
 
 #### Frontend (Next.js)
+
 - Real-time agent trace visualization with color-coded timeline
 - Report view with inline citations and source quality badges
 - Human-in-the-loop feedback interface (approve, dig deeper, correct)
@@ -44,6 +48,7 @@ Initial release of MARSA (Multi-Agent ReSearch Assistant).
 - shadcn/ui component library (button, card, input, badge, tabs)
 
 #### Evaluation & Testing
+
 - Automated evaluation framework with 20 test queries across 5 categories
 - Metrics: citation accuracy, source diversity, fact-check recall, report quality
 - 493 backend unit tests (77% code coverage)
@@ -51,12 +56,14 @@ Initial release of MARSA (Multi-Agent ReSearch Assistant).
 - Integration test suite for real API validation
 
 #### DevOps & Infrastructure
+
 - Docker Compose setup for single-command deployment
 - GitHub Actions CI/CD pipeline (lint, type-check, test, build, coverage)
 - Makefile with standardized development commands
 - LangSmith integration for trace observability
 
 #### Documentation
+
 - Architecture diagrams (Mermaid) covering system overview and LangGraph workflow
 - Design decisions document with technical rationale
 - Setup guide with prerequisites and troubleshooting

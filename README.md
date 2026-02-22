@@ -210,7 +210,6 @@ marsa/
 - [Design Decisions](docs/design-decisions.md) - Rationale for technical choices
 - [Setup Guide](docs/setup.md) - Detailed installation and troubleshooting
 - [Changelog](CHANGELOG.md) - Version history and release notes
-- [Resume Bullets](docs/resume-bullets.md) - Quantified project metrics for resumes
 
 ## License
 
