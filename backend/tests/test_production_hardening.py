@@ -8,8 +8,6 @@ Covers:
 """
 
 import asyncio
-import time
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,6 +15,11 @@ import pytest
 # Input sanitization tests
 # ---------------------------------------------------------------------------
 from middleware.sanitization import sanitize_feedback, sanitize_query
+
+# ---------------------------------------------------------------------------
+# Response cache tests
+# ---------------------------------------------------------------------------
+from utils.cache import ResponseCache
 
 
 class TestSanitizeQuery:
@@ -84,7 +87,6 @@ class TestSanitizeFeedback:
 # ---------------------------------------------------------------------------
 # Response cache tests
 # ---------------------------------------------------------------------------
-from utils.cache import ResponseCache
 
 
 class TestResponseCache:

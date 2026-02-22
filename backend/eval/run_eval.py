@@ -32,12 +32,8 @@ from anthropic import Anthropic  # noqa: E402
 from config import Config  # noqa: E402
 from eval.metrics import (  # noqa: E402
     AggregateMetrics,
-    CitationMetrics,
     EvaluationResult,
-    FactCheckMetrics,
-    LatencyMetrics,
     QualityScores,
-    TokenMetrics,
     calculate_aggregate_metrics,
     calculate_citation_metrics,
     calculate_fact_check_metrics,
@@ -485,21 +481,21 @@ Respond in this exact JSON format:
         print(f"  Successful: {aggregate.successful_queries}")
         print(f"  Failed: {aggregate.failed_queries}")
         
-        print(f"\nQuality Scores (average):")
+        print("\nQuality Scores (average):")
         print(f"  Relevance: {aggregate.avg_relevance:.2f}/5")
         print(f"  Accuracy: {aggregate.avg_accuracy:.2f}/5")
         print(f"  Completeness: {aggregate.avg_completeness:.2f}/5")
         print(f"  Citation Quality: {aggregate.avg_citation_quality:.2f}/5")
         print(f"  OVERALL: {aggregate.avg_overall_quality:.2f}/5")
         
-        print(f"\nPerformance Metrics:")
+        print("\nPerformance Metrics:")
         print(f"  Latency P50: {aggregate.latency_p50_ms:.0f}ms")
         print(f"  Latency P95: {aggregate.latency_p95_ms:.0f}ms")
         print(f"  Avg Latency: {aggregate.latency_avg_ms:.0f}ms")
         print(f"  Total Tokens: {aggregate.total_tokens:,}")
         print(f"  LLM Calls: {aggregate.total_llm_calls}")
         
-        print(f"\nSource Metrics:")
+        print("\nSource Metrics:")
         print(f"  Avg Citation Accuracy: {aggregate.avg_citation_accuracy:.1%}")
         print(f"  Avg Source Diversity: {aggregate.avg_source_diversity:.1f} domains")
         print(f"  Fact-Check Pass Rate: {aggregate.avg_fact_check_pass_rate:.1%}")
@@ -507,7 +503,7 @@ Respond in this exact JSON format:
         if aggregate.false_premise_recall > 0:
             print(f"  False Premise Recall: {aggregate.false_premise_recall:.1%}")
         
-        print(f"\nBy Category:")
+        print("\nBy Category:")
         for category, metrics in aggregate.metrics_by_category.items():
             print(f"  {category}: {metrics['count']} queries, "
                   f"quality={metrics['avg_quality']:.2f}, "
@@ -516,7 +512,7 @@ Respond in this exact JSON format:
         # Show worst queries
         worst = self.identify_worst_queries(results, n=3)
         if worst:
-            print(f"\nWorst Performing Queries:")
+            print("\nWorst Performing Queries:")
             for i, (result, reason) in enumerate(worst, 1):
                 print(f"  {i}. [{result.query_id}] {result.query[:50]}...")
                 print(f"     Reason: {reason}")

@@ -8,20 +8,17 @@ with fully mocked data (no API calls).
 import sys
 from pathlib import Path
 
-import pytest
 
 # Add backend directory to path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from eval.metrics import (  # noqa: E402
-    AggregateMetrics,
     CitationMetrics,
     EvaluationResult,
     FactCheckMetrics,
     LatencyMetrics,
     QualityScores,
-    TokenMetrics,
     calculate_aggregate_metrics,
     calculate_citation_metrics,
     calculate_fact_check_metrics,

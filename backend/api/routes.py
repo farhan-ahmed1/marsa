@@ -28,7 +28,7 @@ from api.streaming import (
     resume_workflow_with_streaming,
     run_workflow_with_streaming,
 )
-from graph.state import PipelineStatus, Report
+from graph.state import PipelineStatus
 from middleware.sanitization import sanitize_feedback, sanitize_query
 from utils.cache import response_cache
 

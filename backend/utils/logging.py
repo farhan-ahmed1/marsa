@@ -14,7 +14,6 @@ Features:
 import logging
 import os
 import sys
-from typing import Any
 
 import structlog
 

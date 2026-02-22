@@ -7,27 +7,21 @@ without running the real LLM-backed agents.
 
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from graph.state import (  # noqa: E402
     AgentName,
-    AgentState,
-    Claim,
     ComplexityLevel,
-    ConfidenceLevel,
     HITLFeedback,
     PipelineStatus,
     QueryPlan,
     QueryType,
     SearchStrategy,
     TraceEvent,
-    VerificationResult,
-    VerificationVerdict,
     create_initial_state,
 )
 

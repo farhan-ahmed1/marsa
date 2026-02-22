@@ -9,7 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
 
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
@@ -23,9 +22,8 @@ from eval.mock_eval import (  # noqa: E402
     compare_results,
     run_mock_evaluation,
     run_mock_single_query,
-    save_mock_results,
 )
-from eval.metrics import AggregateMetrics, EvaluationResult  # noqa: E402
+from eval.metrics import EvaluationResult  # noqa: E402
 
 import random  # noqa: E402
 
@@ -215,10 +213,10 @@ class TestSaveAndCompare:
 
     def test_save_results(self):
         results, aggregate = run_mock_evaluation(limit=2)
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory() as _tmpdir:
             # Patch output_dir
             import eval.mock_eval as me
-            original_dir = Path("data/eval_results")
+            _original_dir = Path("data/eval_results")
             try:
                 output_path = me.save_mock_results(
                     results, aggregate, "test_output.json"

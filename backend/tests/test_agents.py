@@ -1761,7 +1761,6 @@ class TestFactCheckerConstants:
 
 
 from agents.synthesizer import (  # noqa: E402
-    generate_report,
     synthesize_node,
     _build_citation_map,
     _format_claims_for_prompt,

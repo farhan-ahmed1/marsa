@@ -13,11 +13,9 @@ The output format matches ``run_eval.py`` so results can be compared.
 """
 
 import argparse
-import asyncio
 import hashlib
 import json
 import random
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -26,12 +24,8 @@ import structlog
 
 from eval.metrics import (
     AggregateMetrics,
-    CitationMetrics,
     EvaluationResult,
-    FactCheckMetrics,
-    LatencyMetrics,
     QualityScores,
-    TokenMetrics,
     calculate_aggregate_metrics,
     calculate_citation_metrics,
     calculate_fact_check_metrics,
@@ -391,27 +385,27 @@ def print_summary(
     print(f"  Successful: {aggregate.successful_queries}")
     print(f"  Failed: {aggregate.failed_queries}")
 
-    print(f"\nQuality Scores (average):")
+    print("\nQuality Scores (average):")
     print(f"  Relevance:        {aggregate.avg_relevance:.2f}/5")
     print(f"  Accuracy:         {aggregate.avg_accuracy:.2f}/5")
     print(f"  Completeness:     {aggregate.avg_completeness:.2f}/5")
     print(f"  Citation Quality: {aggregate.avg_citation_quality:.2f}/5")
     print(f"  OVERALL:          {aggregate.avg_overall_quality:.2f}/5")
 
-    print(f"\nPerformance Metrics:")
+    print("\nPerformance Metrics:")
     print(f"  Latency P50:    {aggregate.latency_p50_ms:.0f}ms")
     print(f"  Latency Avg:    {aggregate.latency_avg_ms:.0f}ms")
     print(f"  Total Tokens:   {aggregate.total_tokens:,}")
     print(f"  LLM Calls:      {aggregate.total_llm_calls}")
 
-    print(f"\nSource Metrics:")
+    print("\nSource Metrics:")
     print(f"  Avg Citation Accuracy:   {aggregate.avg_citation_accuracy:.1%}")
     print(f"  Avg Source Diversity:     {aggregate.avg_source_diversity:.1f} domains")
     print(f"  Fact-Check Pass Rate:     {aggregate.avg_fact_check_pass_rate:.1%}")
     if aggregate.false_premise_recall > 0:
         print(f"  False Premise Recall:     {aggregate.false_premise_recall:.1%}")
 
-    print(f"\nBy Category:")
+    print("\nBy Category:")
     for category, metrics in sorted(aggregate.metrics_by_category.items()):
         print(
             f"  {category}: {metrics['count']} queries, "
@@ -419,7 +413,7 @@ def print_summary(
         )
 
     if comparisons:
-        print(f"\n--- Comparison with Previous Run ---")
+        print("\n--- Comparison with Previous Run ---")
         for field, data in comparisons.items():
             arrow = "+" if data["improved"] else "-" if data["delta"] != 0 else "="
             sign = "+" if data["delta"] >= 0 else ""

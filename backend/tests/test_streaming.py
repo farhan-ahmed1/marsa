@@ -7,9 +7,8 @@ and SSE event streaming without real workflow execution.
 import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
@@ -41,7 +40,7 @@ class TestEventQueueManager:
 
     async def test_create_stream_duplicate(self):
         manager = EventQueueManager()
-        queue1 = await manager.create_stream("dup-stream")
+        _queue1 = await manager.create_stream("dup-stream")
         queue2 = await manager.create_stream("dup-stream")
         # Should create a new queue but still exist
         assert queue2 is not None
@@ -235,7 +234,6 @@ class TestStreamAgentEvents:
 
     async def test_stream_unknown_stream_yields_error(self):
         """Non-existent stream with no state should yield error."""
-        from api.streaming import event_queue_manager as eqm
 
         # Make sure the stream doesn't exist
         stream_id = "totally-unknown-stream"

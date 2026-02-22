@@ -238,7 +238,6 @@ class TestDocumentStoreServer:
         from mcp_servers.document_store import (
             ingest_document_impl,
             list_documents_impl,
-            get_collection,
         )
         
         # Mock embedding to return consistent vector
