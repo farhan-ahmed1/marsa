@@ -1,4 +1,4 @@
-# MARSA
+# MARSA - Multi-Agent ReSearch Assistant
 
 [![CI Pipeline](https://github.com/farhan-ahmed1/marsa/actions/workflows/ci.yml/badge.svg)](https://github.com/farhan-ahmed1/marsa/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/farhan-ahmed1/marsa/graph/badge.svg)](https://codecov.io/gh/farhan-ahmed1/marsa)
