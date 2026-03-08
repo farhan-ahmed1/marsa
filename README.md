@@ -7,7 +7,7 @@
 [![LangGraph](https://img.shields.io/badge/built%20with-LangGraph-1C3C59)](https://github.com/langchain-ai/langgraph)
 [![Claude](https://img.shields.io/badge/powered%20by-Claude-D97757)](https://www.anthropic.com/claude)
 
-**Multi-Agent ReSearch Assistant** - A production-grade multi-agent system that orchestrates specialized AI agents via LangGraph with MCP-connected data sources to produce well-sourced, fact-checked research reports.
+**Multi-Agent ReSearch Assistant** - A multi-agent system that orchestrates specialized AI agents via LangGraph with MCP-connected data sources to produce well-sourced, fact-checked research reports.
 
 <!-- Demo GIF placeholder: record with OBS Studio, convert with gifski -->
 <!-- ![MARSA Demo](docs/assets/demo.gif) -->
